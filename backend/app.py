@@ -1,4 +1,6 @@
 from flask import Flask, jsonify, request
+from datetime import datetime, date, time
+import enum
 from .database import engine
 from .models import Base
 from .models import (
@@ -12,16 +14,84 @@ from .models import (
 from .database import SessionLocal
 from datetime import datetime, date, time
 from sqlalchemy.exc import IntegrityError
+import os
+import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+import logging
+from flask_cors import CORS
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Функция для создания базы данных, если она не существует
+def create_database_if_not_exists():
+    # Получаем параметры подключения из переменных окружения или используем значения по умолчанию
+    DB_USER = os.environ.get('DB_USER', 'postgres')
+    DB_PASSWORD = os.environ.get('DB_PASSWORD', '1234')
+    DB_HOST = os.environ.get('DB_HOST', 'localhost')
+    DB_PORT = os.environ.get('DB_PORT', '5432')
+    DB_NAME = os.environ.get('DB_NAME', 'db_beauty_room_38')
+    
+    try:
+        # Подключаемся к серверу PostgreSQL
+        conn = psycopg2.connect(
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+            database='postgres'  # Подключаемся к системной базе postgres
+        )
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        
+        # Проверяем, существует ли база данных
+        cursor.execute("SELECT 1 FROM pg_catalog.pg_database WHERE datname = %s", (DB_NAME,))
+        exists = cursor.fetchone()
+        
+        if not exists:
+            logger.info(f"База данных {DB_NAME} не существует. Создаем...")
+            # Создаем базу данных
+            cursor.execute(f'CREATE DATABASE {DB_NAME}')
+            logger.info(f"База данных {DB_NAME} успешно создана!")
+        else:
+            logger.info(f"База данных {DB_NAME} уже существует.")
+        
+        cursor.close()
+        conn.close()
+        
+        # Создаем таблицы в базе данных
+        Base.metadata.create_all(bind=engine)
+        logger.info("Таблицы успешно созданы или уже существуют.")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка при создании базы данных: {str(e)}")
+        return False
 
 app = Flask(__name__)
-
-Base.metadata.create_all(bind=engine)
+CORS(app)
 
 # Вспомогательные функции
+import enum
+
 def serialize(model_instance):
     if not model_instance:
         return None
-    return {c.name: getattr(model_instance, c.name) for c in model_instance.__table__.columns}
+    result = {}
+    for c in model_instance.__table__.columns:
+        value = getattr(model_instance, c.name)
+        # Обработка типов, которые не сериализуются в JSON напрямую
+        if isinstance(value, (datetime, date)):
+            result[c.name] = value.isoformat()
+        elif isinstance(value, time):
+            result[c.name] = value.strftime('%H:%M:%S')
+        elif isinstance(value, enum.Enum):
+            result[c.name] = value.value
+        else:
+            result[c.name] = value
+    return result
 
 def get_or_404(session, model, id):
     instance = session.query(model).get(id)
@@ -165,8 +235,6 @@ def clients(id=None):
                 full_name=data['full_name'],
                 phone=data['phone'],
                 email=data.get('email'),  # email может быть null
-                password=data['password'],
-                remember_token=data.get('remember_token'),  # если есть
                 telegram_chat_id=data.get('telegram_chat_id'),  # может быть null
                 created_at=datetime.now(),
                 updated_at=datetime.now()
@@ -183,8 +251,6 @@ def clients(id=None):
             client.full_name = data.get('full_name', client.full_name)
             client.phone = data.get('phone', client.phone)
             client.email = data.get('email', client.email)
-            if 'password' in data:
-                client.password = data['password']
             client.updated_at = datetime.now()
             session.commit()
             return jsonify(serialize(client))
@@ -1063,4 +1129,5 @@ def appointment_complex_pivot(complex_id=None, appointment_id=None):
         session.close()
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    create_database_if_not_exists()
+    app.run(host='0.0.0.0', port=5000, debug=True)

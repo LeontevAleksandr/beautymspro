@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, BigInteger, Text, Date, Time
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, BigInteger, Text, Date, Time, Table
 from sqlalchemy.orm import relationship
 from .database import Base
 from sqlalchemy import Enum
@@ -21,7 +21,8 @@ class Qualification(Base):
     updated_at = Column(DateTime)
     
     employees = relationship("Employee", back_populates="qualification")
-    services = relationship("Service", back_populates="required_qualification")
+    specialization_qualifications = relationship("SpecializationQualificationPivot", back_populates="qualification")
+    service_qualifications = relationship("ServiceQualificationPivot", back_populates="qualification")
 
 class Client(Base):
     __tablename__ = 'clients'
@@ -29,8 +30,6 @@ class Client(Base):
     full_name = Column(String, index=True)
     phone = Column(String, unique=True, index=True)
     email = Column(String, unique=True, index=True, nullable=True)
-    password = Column(String)
-    remember_token = Column(String)
     telegram_chat_id = Column(BigInteger, unique=True, nullable=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
@@ -47,6 +46,19 @@ class Specialization(Base):
     
     employees = relationship("Employee", back_populates="specialization")
     services = relationship("Service", back_populates="specialization")
+    specialization_qualifications = relationship("SpecializationQualificationPivot", back_populates="specialization")
+
+# Новая таблица для связи специализаций и квалификаций
+class SpecializationQualification(Base):
+    __tablename__ = 'specialization_qualifications'
+    specialization_id = Column(Integer, ForeignKey('specializations.id'), primary_key=True)
+    qualification_id = Column(Integer, ForeignKey('qualifications.id'), primary_key=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+    
+    specialization = relationship("Specialization", back_populates="specialization_qualifications")
+    qualification = relationship("Qualification", back_populates="specialization_qualifications")
 
 class Employee(Base):
     __tablename__ = 'employees'
@@ -57,7 +69,7 @@ class Employee(Base):
     passport_number = Column(String, unique=True, index=True)
     phone = Column(String, unique=True, index=True, nullable=True)
     email = Column(String, unique=True, index=True, nullable=True)
-    password = Column(String)
+    password = Column(String(255))
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     
@@ -82,16 +94,39 @@ class Service(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     specialization_id = Column(Integer, ForeignKey('specializations.id'))
-    qualification_level_id = Column(Integer, ForeignKey('qualifications.id'), nullable=True)
+    base_price = Column(Float)  # Базовая стоимость услуги
     duration = Column(Integer)
-    price = Column(Float)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     
     specialization = relationship("Specialization", back_populates="services")
-    required_qualification = relationship("Qualification", back_populates="services")
+    service_qualifications = relationship("ServiceQualificationPivot", back_populates="service")
     complexes = relationship("ServiceComplex", secondary="service_complex_pivot", back_populates="services")
     appointments = relationship("Appointment", secondary="appointment_service_pivot", back_populates="services")
+
+# Новая таблица для связи услуг и квалификаций с ценами
+class SpecializationQualificationPivot(Base):
+    __tablename__ = 'specialization_qualification_pivot'
+    specialization_id = Column(Integer, ForeignKey('specializations.id'), primary_key=True)
+    qualification_id = Column(Integer, ForeignKey('qualifications.id'), primary_key=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+    
+    specialization = relationship("Specialization", back_populates="specialization_qualifications")
+    qualification = relationship("Qualification", back_populates="specialization_qualifications")
+
+class ServiceQualificationPivot(Base):
+    __tablename__ = 'service_qualification_pivot'
+    service_id = Column(Integer, ForeignKey('services.id'), primary_key=True)
+    qualification_id = Column(Integer, ForeignKey('qualifications.id'), primary_key=True)
+    price_modifier = Column(Float, default=0.0)  # Модификатор цены для данного уровня квалификации
+    is_allowed = Column(Boolean, default=True)  # Разрешен ли данный уровень квалификации для услуги
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+    
+    service = relationship("Service", back_populates="service_qualifications")
+    qualification = relationship("Qualification", back_populates="service_qualifications")
 
 class Appointment(Base):
     __tablename__ = 'appointments'
@@ -105,6 +140,7 @@ class Appointment(Base):
     is_completed = Column(Boolean, default=False)
     is_paid = Column(Boolean, default=False)
     notes = Column(Text)
+    final_price = Column(Float)  # Итоговая цена с учетом квалификации мастера
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     
@@ -153,7 +189,7 @@ class ScheduleException(Base):
     updated_at = Column(DateTime)
     
     schedule = relationship("Schedule", back_populates="exceptions")
-    
+
 class NotificationStatus(enum.Enum):
     scheduled = "scheduled"
     sent = "sent"
