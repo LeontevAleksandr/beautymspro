@@ -144,46 +144,56 @@ h3 {
     border: 1px solid #ddd;
 }
 
-/* Стили для выпадающего списка в боковой панели */
-.dropdown {
-    position: relative;
-}
-
-.dropdown-toggle {
-    width: 100%;
-    text-align: left;
-    padding: 10px 15px;
-    background-color: transparent;
-    border: none;
-    cursor: pointer;
+/* Стили для перетаскивания */
+.draggable-item {
+    cursor: grab;
+    background-color: #f9f9f9;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 8px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
 }
 
-.dropdown-menu {
-    position: absolute;
-    left: 0;
-    width: 100%;
-    background-color: #f9f9f9;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    z-index: 1;
-}
-
-.dropdown-menu button {
-    width: 100%;
-    text-align: left;
-    padding: 10px 15px;
-    background-color: transparent;
-    border: none;
-    cursor: pointer;
-}
-
-.dropdown-menu button:hover {
+.draggable-item:hover {
     background-color: #f0f0f0;
 }
 
-.dropdown-menu button.active {
+.draggable-item.dragging {
     background-color: #e0e0e0;
+    opacity: 0.8;
+}
+
+.drag-handle {
+    margin-right: 10px;
+    color: #999;
+    cursor: grab;
+}
+
+.qualification-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+
+.qualification-item:hover {
+    background-color: #f5f5f5;
+}
+
+.qualification-item .priority {
+    margin-right: 16px;
     font-weight: bold;
+    color: #666;
+}
+
+.qualification-item .name {
+    flex-grow: 1;
+}
+
+.qualification-item .actions {
+    display: flex;
+    gap: 8px;
 }

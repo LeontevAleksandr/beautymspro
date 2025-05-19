@@ -15,6 +15,7 @@ import APemployee from './APemployee';
 import APservice from './APservice';
 import APanalytic from './APanalytic';
 import APspecialization from './APspecialization';
+import APschedule from './APschedule';
 
 function AdminPanel({ records }) {
     // Все useState идут в начале компонента
@@ -48,6 +49,8 @@ function AdminPanel({ records }) {
                 return <APemployee />;
             case 'specializations':
                 return <APspecialization />;
+            case 'schedule':
+                return <APschedule />;
             case 'services':
                 return <APservice />;
             case 'analytics':
@@ -165,6 +168,20 @@ function AdminPanel({ records }) {
                                     }}
                                 >
                                     <Typography variant="body2">Управление специализациями</Typography>
+                                </Box>
+                                <Box
+                                    sx={{
+                                        padding: '10px 15px',
+                                        cursor: 'pointer',
+                                        backgroundColor: activeSection === 'schedule' ? '#495057' : 'transparent',
+                                        '&:hover': { backgroundColor: '#495057' }
+                                    }}
+                                    onClick={() => {
+                                        setActiveSection('schedule');
+                                        setStaffDropdownOpen(false);
+                                    }}
+                                >
+                                    <Typography variant="body2">Управление расписанием</Typography>
                                 </Box>
                             </Box>
                         )}

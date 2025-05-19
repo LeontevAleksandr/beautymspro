@@ -9,7 +9,8 @@ from .models import (
     ClientPreferences, ScheduleException, Notification,
     EmployeeWorkload, ServicePopularity, Qualification,
     ServiceComplexPivot, ScheduleAppointment,
-    AppointmentServicePivot, AppointmentComplexPivot
+    AppointmentServicePivot, AppointmentComplexPivot, 
+    SpecializationQualificationPivot, ServiceQualificationPivot
 )
 from .database import SessionLocal
 from datetime import datetime, date, time
@@ -156,8 +157,6 @@ def qualifications(id=None):
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()
-
-
 
 # ClientStatus
 @app.route('/api/client_statuses', methods=['GET', 'POST'])
@@ -337,15 +336,25 @@ def employees(id=None):
                 emp = get_or_404(session, Employee, id)
                 if not emp:
                     return jsonify({'error': 'Not found'}), 404
-                return jsonify(serialize(emp))
+                data = serialize(emp)
+                data['specialization'] = serialize(emp.specialization) if hasattr(emp, 'specialization') and emp.specialization else None
+                data['qualification'] = serialize(emp.qualification) if hasattr(emp, 'qualification') and emp.qualification else None
+                return jsonify(data)
             else:
                 emps = session.query(Employee).all()
-                return jsonify([serialize(e) for e in emps])
+                result = []
+                for emp in emps:
+                    item = serialize(emp)
+                    item['specialization'] = serialize(emp.specialization) if hasattr(emp, 'specialization') and emp.specialization else None
+                    item['qualification'] = serialize(emp.qualification) if hasattr(emp, 'qualification') and emp.qualification else None
+                    result.append(item)
+                return jsonify(result)
                 
         elif request.method == 'POST':
             data = request.json
             emp = Employee(
                 specialization_id=data.get('specialization_id'),
+                qualification_level_id=data.get('qualification_level_id'),
                 full_name=data['full_name'],
                 passport_number=data['passport_number'],
                 phone=data.get('phone'),
@@ -364,6 +373,7 @@ def employees(id=None):
                 return jsonify({'error': 'Not found'}), 404
             data = request.json
             emp.specialization_id = data.get('specialization_id', emp.specialization_id)
+            emp.qualification_level_id = data.get('qualification_level_id', emp.qualification_level_id)
             emp.full_name = data.get('full_name', emp.full_name)
             emp.passport_number = data.get('passport_number', emp.passport_number)
             emp.phone = data.get('phone', emp.phone)
@@ -461,7 +471,6 @@ def services(id=None):
                 # Добавляем связанные объекты
                 data = serialize(service)
                 data['specialization'] = serialize(service.specialization) if hasattr(service, 'specialization') and service.specialization else None
-                data['required_qualification'] = serialize(service.required_qualification) if hasattr(service, 'required_qualification') and service.required_qualification else None
                 return jsonify(data)
             else:
                 services_list = session.query(Service).all()
@@ -469,7 +478,6 @@ def services(id=None):
                 for s in services_list:
                     item = serialize(s)
                     item['specialization'] = serialize(s.specialization) if hasattr(s, 'specialization') and s.specialization else None
-                    item['required_qualification'] = serialize(s.required_qualification) if hasattr(s, 'required_qualification') and s.required_qualification else None
                     result.append(item)
                 return jsonify(result)
         elif request.method == 'POST':
@@ -477,9 +485,8 @@ def services(id=None):
             service = Service(
                 name=data['name'],
                 specialization_id=data['specialization_id'],
-                qualification_level_id=data.get('qualification_level_id'),
+                base_price=data['base_price'],
                 duration=data['duration'],
-                price=data['price'],
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
@@ -493,9 +500,8 @@ def services(id=None):
             data = request.json
             service.name = data.get('name', service.name)
             service.specialization_id = data.get('specialization_id', service.specialization_id)
-            service.qualification_level_id = data.get('qualification_level_id', service.qualification_level_id)
+            service.base_price = data.get('base_price', service.base_price)
             service.duration = data.get('duration', service.duration)
-            service.price = data.get('price', service.price)
             service.updated_at = datetime.now()
             session.commit()
             return jsonify(serialize(service))
@@ -1124,6 +1130,191 @@ def appointment_complex_pivot(complex_id=None, appointment_id=None):
         return jsonify({'error': 'Integrity error', 'details': str(e)}), 400
     except Exception as e:
         session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+# SpecializationQualificationPivot
+@app.route('/api/specialization_qualifications', methods=['GET', 'POST'])
+@app.route('/api/specialization_qualifications/<int:specialization_id>/<int:qualification_id>', methods=['GET', 'PUT', 'DELETE'])
+def specialization_qualifications(specialization_id=None, qualification_id=None):
+    session = SessionLocal()
+    try:
+        if request.method == 'GET':
+            if specialization_id is not None and qualification_id is not None:
+                spec_qual = session.query(SpecializationQualificationPivot).filter_by(
+                    specialization_id=specialization_id, 
+                    qualification_id=qualification_id
+                ).first()
+                if not spec_qual:
+                    return jsonify({'error': 'Not found'}), 404
+                
+                result = serialize(spec_qual)
+                result['specialization'] = serialize(spec_qual.specialization_qualifications) if hasattr(spec_qual, 'specialization_qualifications') else None
+                result['qualification'] = serialize(spec_qual.qualification) if hasattr(spec_qual, 'qualification') else None
+                return jsonify(result)
+            else:
+                spec_quals = session.query(SpecializationQualificationPivot).all()
+                result = []
+                for sq in spec_quals:
+                    item = serialize(sq)
+                    item['specialization'] = serialize(sq.specialization_qualifications) if hasattr(sq, 'specialization_qualifications') else None
+                    item['qualification'] = serialize(sq.qualification) if hasattr(sq, 'qualification') else None
+                    result.append(item)
+                return jsonify(result)
+                
+        elif request.method == 'POST':
+            data = request.json
+            spec_qual = SpecializationQualificationPivot(
+                specialization_id=data['specialization_id'],
+                qualification_id=data['qualification_id'],
+                description=data.get('description')
+            )
+            session.add(spec_qual)
+            session.commit()
+            return jsonify(serialize(spec_qual)), 201
+            
+        elif request.method == 'PUT':
+            spec_qual = session.query(SpecializationQualificationPivot).filter_by(
+                specialization_id=specialization_id, 
+                qualification_id=qualification_id
+            ).first()
+            if not spec_qual:
+                return jsonify({'error': 'Not found'}), 404
+                
+            data = request.json
+            spec_qual.description = data.get('description', spec_qual.description)
+            session.commit()
+            return jsonify(serialize(spec_qual))
+            
+        elif request.method == 'DELETE':
+            spec_qual = session.query(SpecializationQualificationPivot).filter_by(
+                specialization_id=specialization_id, 
+                qualification_id=qualification_id
+            ).first()
+            if not spec_qual:
+                return jsonify({'error': 'Not found'}), 404
+                
+            session.delete(spec_qual)
+            session.commit()
+            return jsonify({'message': 'Deleted successfully'}), 200
+            
+    except IntegrityError as e:
+        session.rollback()
+        return jsonify({'error': 'Integrity error', 'details': str(e)}), 400
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+# ServiceQualificationPivot
+@app.route('/api/service_qualifications', methods=['GET', 'POST'])
+@app.route('/api/service_qualifications/<int:service_id>/<int:qualification_id>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/service_qualifications/<int:service_id>', methods=['DELETE'])  # Новый маршрут
+def service_qualifications(service_id=None, qualification_id=None):
+    session = SessionLocal()
+    try:
+        if request.method == 'GET':
+            if service_id is not None and qualification_id is not None:
+                service_qual = session.query(ServiceQualificationPivot).filter_by(
+                    service_id=service_id, 
+                    qualification_id=qualification_id
+                ).first()
+                if not service_qual:
+                    return jsonify({'error': 'Not found'}), 404
+                
+                result = serialize(service_qual)
+                result['service'] = serialize(service_qual.service) if hasattr(service_qual, 'service') else None
+                result['qualification'] = serialize(service_qual.qualification) if hasattr(service_qual, 'qualification') else None
+                return jsonify(result)
+            else:
+                service_quals = session.query(ServiceQualificationPivot).all()
+                result = []
+                for sq in service_quals:
+                    item = serialize(sq)
+                    item['service'] = serialize(sq.service) if hasattr(sq, 'service') else None
+                    item['qualification'] = serialize(sq.qualification) if hasattr(sq, 'qualification') else None
+                    result.append(item)
+                return jsonify(result)
+                
+        elif request.method == 'POST':
+            data = request.json
+            service_qual = ServiceQualificationPivot(
+                service_id=data['service_id'],
+                qualification_id=data['qualification_id'],
+                price_modified=data.get('price_modified', 0.0),  # Измененное название и значение по умолчанию
+                is_allowed=data.get('is_allowed', True)
+            )
+            session.add(service_qual)
+            session.commit()
+            return jsonify(serialize(service_qual)), 201
+            
+        elif request.method == 'PUT':
+            service_qual = session.query(ServiceQualificationPivot).filter_by(
+                service_id=service_id, 
+                qualification_id=qualification_id
+            ).first()
+            if not service_qual:
+                return jsonify({'error': 'Not found'}), 404
+                
+            data = request.json
+            service_qual.price_modified = data.get('price_modified', service_qual.price_modified)
+            service_qual.is_allowed = data.get('is_allowed', service_qual.is_allowed)
+            session.commit()
+            return jsonify(serialize(service_qual))
+            
+        elif request.method == 'DELETE':
+            if service_id is not None and qualification_id is not None:
+                # Удаление конкретной связи
+                service_qual = session.query(ServiceQualificationPivot).filter_by(
+                    service_id=service_id, 
+                    qualification_id=qualification_id
+                ).first()
+                if not service_qual:
+                    return jsonify({'error': 'Not found'}), 404
+                    
+                session.delete(service_qual)
+                session.commit()
+                return jsonify({'message': 'Deleted successfully'}), 200
+            elif service_id is not None:
+                # Удаление всех связей для услуги
+                service_quals = session.query(ServiceQualificationPivot).filter_by(
+                    service_id=service_id
+                ).all()
+                
+                for sq in service_quals:
+                    session.delete(sq)
+                
+                session.commit()
+                return jsonify({'message': 'All qualifications for service deleted successfully'}), 200
+            
+    except IntegrityError as e:
+        session.rollback()
+        return jsonify({'error': 'Integrity error', 'details': str(e)}), 400
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+# Get qualifications for a specific specialization
+@app.route('/api/specializations/<int:specialization_id>/qualifications', methods=['GET'])
+def get_specialization_qualifications(specialization_id):
+    session = SessionLocal()
+    try:
+        spec_quals = session.query(SpecializationQualificationPivot).filter_by(
+            specialization_id=specialization_id
+        ).all()
+        
+        result = []
+        for sq in spec_quals:
+            item = serialize(sq)
+            item['qualification'] = serialize(sq.qualification) if hasattr(sq, 'qualification') else None
+            result.append(item)
+            
+        return jsonify(result)
+    except Exception as e:
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()

@@ -1,8 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Typography, Box, Button, TextField, TableContainer, 
     Paper, Table, TableHead, TableRow, TableCell, TableBody, Select, MenuItem, 
     FormControl, InputLabel, Dialog, DialogActions, DialogContent, DialogTitle, 
-    FormControlLabel, Checkbox } from '@mui/material';
+    FormControlLabel, Checkbox, Grid, Tooltip, IconButton, Divider } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { ru } from 'date-fns/locale';
+import { format, addMinutes, parseISO, isWithinInterval } from 'date-fns';
+import AddIcon from '@mui/icons-material/Add';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import TodayIcon from '@mui/icons-material/Today';
 
 function APappointment({ records, clients, setClients, employees, services }) {
     const [openDialog, setOpenDialog] = useState(false);
@@ -11,12 +20,15 @@ function APappointment({ records, clients, setClients, employees, services }) {
     const [masterFilter, setMasterFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
     const [newRecord, setNewRecord] = useState({
-        name: '',
-        service: '',
+        client_id: '',
+        service_id: '',
+        employee_id: '',
         date: '',
         time: '',
-        master: '',
-        status: ''
+        status: 'created',
+        is_completed: false,
+        is_paid: false,
+        notes: ''
     });
     const [addNewClient, setAddNewClient] = useState(false);
     const [newClient, setNewClient] = useState({
@@ -24,6 +36,357 @@ function APappointment({ records, clients, setClients, employees, services }) {
         phone: '',
         email: ''
     });
+    const [availableEmployees, setAvailableEmployees] = useState([]);
+    const [serviceQualifications, setServiceQualifications] = useState([]);
+    const [servicePrice, setServicePrice] = useState(null);
+    
+    // Новые состояния для табличного представления
+    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [schedules, setSchedules] = useState([]);
+    const [timeSlots, setTimeSlots] = useState([]);
+    const [appointments, setAppointments] = useState([]);
+    const [filteredEmployees, setFilteredEmployees] = useState([]);
+    
+    // Добавляем состояние для исключений (перерывов)
+    const [scheduleExceptions, setScheduleExceptions] = useState([]);
+    
+    // Проверяем, что clients является массивом
+    const clientsArray = Array.isArray(clients) ? clients : [];
+    
+    // Загрузка расписаний и записей при изменении даты
+    useEffect(() => {
+        fetchSchedulesForDate(selectedDate);
+        fetchAppointmentsForDate(selectedDate);
+        fetchScheduleExceptions();
+    }, [selectedDate]);
+    
+    // Функция для загрузки исключений (перерывов)
+    const fetchScheduleExceptions = async () => {
+        try {
+            const response = await fetch('http://localhost:5000/api/schedule_exceptions');
+            if (response.ok) {
+                const data = await response.json();
+                setScheduleExceptions(data);
+            }
+        } catch (error) {
+            console.error('Ошибка при загрузке исключений:', error);
+        }
+    };
+    
+    // Загрузка расписаний для выбранной даты
+    const fetchSchedulesForDate = async (date) => {
+        try {
+            const formattedDate = format(date, 'yyyy-MM-dd');
+            const response = await fetch(`http://localhost:5000/api/schedules`);
+            if (response.ok) {
+                const data = await response.json();
+                // Фильтруем расписания для выбранной даты
+                const filteredSchedules = data.filter(schedule => 
+                    schedule.date === formattedDate
+                );
+                setSchedules(filteredSchedules);
+                
+                // Фильтруем сотрудников, которые работают в этот день
+                const workingEmployeeIds = filteredSchedules.map(s => s.employee_id);
+                const workingEmployees = employees.filter(emp => 
+                    workingEmployeeIds.includes(emp.id)
+                );
+                setFilteredEmployees(workingEmployees);
+                
+                // Генерируем временные слоты
+                generateTimeSlots(filteredSchedules);
+            }
+        } catch (error) {
+            console.error('Ошибка при загрузке расписаний:', error);
+        }
+    };
+    
+    // Загрузка записей для выбранной даты
+    const fetchAppointmentsForDate = async (date) => {
+        try {
+            const formattedDate = format(date, 'yyyy-MM-dd');
+            const response = await fetch(`http://localhost:5000/api/appointments`);
+            if (response.ok) {
+                const data = await response.json();
+                // Фильтруем записи для выбранной даты
+                const filteredAppointments = data.filter(appointment => 
+                    appointment.datetime && appointment.datetime.startsWith(formattedDate)
+                );
+                setAppointments(filteredAppointments);
+            }
+        } catch (error) {
+            console.error('Ошибка при загрузке записей:', error);
+        }
+    };
+    
+    // Генерация временных слотов на основе расписаний
+    const generateTimeSlots = (schedules) => {
+        if (!schedules || schedules.length === 0) {
+            setTimeSlots([]);
+            return;
+        }
+        
+        // Находим самое раннее начало и самое позднее окончание рабочего дня
+        let earliestStart = '23:59:59';
+        let latestEnd = '00:00:00';
+        
+        schedules.forEach(schedule => {
+            if (schedule.start_time < earliestStart) {
+                earliestStart = schedule.start_time;
+            }
+            if (schedule.end_time > latestEnd) {
+                latestEnd = schedule.end_time;
+            }
+        });
+        
+        // Создаем временные слоты с интервалом 15 минут
+        const slots = [];
+        const startDate = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${earliestStart}`);
+        const endDate = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${latestEnd}`);
+        
+        let currentSlot = startDate;
+        while (currentSlot < endDate) {
+            slots.push(format(currentSlot, 'HH:mm'));
+            currentSlot = addMinutes(currentSlot, 15);
+        }
+        
+        setTimeSlots(slots);
+    };
+    
+    // Проверка, работает ли сотрудник в определенное время
+    const isEmployeeWorking = (employeeId, timeSlot) => {
+        const schedule = schedules.find(s => s.employee_id === employeeId);
+        if (!schedule) return false;
+        
+        const slotTime = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${timeSlot}:00`);
+        const startTime = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${schedule.start_time}`);
+        const endTime = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${schedule.end_time}`);
+        
+        // Проверяем, не попадает ли временной слот в перерыв
+        if (isInException(schedule.id, timeSlot)) {
+            return false;
+        }
+        
+        return isWithinInterval(slotTime, { start: startTime, end: endTime });
+    };
+    
+    // Проверка, попадает ли временной слот в перерыв
+    const isInException = (scheduleId, timeSlot) => {
+        // Преобразуем ID в числовой тип для корректного сравнения
+        const numericScheduleId = parseInt(scheduleId, 10);
+        
+        // Фильтруем исключения для данного расписания
+        const exceptions = scheduleExceptions.filter(exc => 
+            parseInt(exc.schedule_id, 10) === numericScheduleId
+        );
+        
+        if (exceptions.length === 0) return false;
+        
+        // Проверяем, попадает ли временной слот в какое-либо исключение
+        const slotTime = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${timeSlot}:00`);
+        
+        return exceptions.some(exc => {
+            const exceptionStart = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${exc.start_time}`);
+            const exceptionEnd = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${exc.end_time}`);
+            
+            return isWithinInterval(slotTime, { start: exceptionStart, end: exceptionEnd });
+        });
+    };
+    
+    // Получение информации о перерывах для тултипа
+    const getExceptionsInfo = (employeeId) => {
+        const schedule = schedules.find(s => s.employee_id === employeeId);
+        if (!schedule) return '';
+        
+        // Преобразуем ID в числовой тип для корректного сравнения
+        const scheduleId = parseInt(schedule.id, 10);
+        
+        // Фильтруем исключения для данного расписания
+        const exceptions = scheduleExceptions.filter(exc => 
+            parseInt(exc.schedule_id, 10) === scheduleId
+        );
+        
+        if (exceptions.length === 0) return '';
+        
+        // Формируем текст для тултипа
+        return exceptions.map(exc => 
+            `${exc.start_time.slice(0, 5)} - ${exc.end_time.slice(0, 5)}: ${exc.reason}`
+        ).join('\n');
+    };
+    
+    // Получение записей для определенного временного слота и сотрудника
+    const getAppointmentForSlot = (employeeId, timeSlot) => {
+        return appointments.find(appointment => {
+            if (appointment.employee_id !== employeeId) return false;
+            
+            const appointmentTime = appointment.datetime ? 
+                format(new Date(appointment.datetime), 'HH:mm') : '';
+            
+            return appointmentTime === timeSlot;
+        });
+    };
+    
+    // Получение информации о клиенте по ID
+    const getClientName = (clientId) => {
+        const client = clientsArray.find(c => c.id === clientId);
+        return client ? client.full_name : 'Неизвестный клиент';
+    };
+    
+    // Получение информации об услуге по ID
+    const getServiceName = (serviceId) => {
+        const service = services.find(s => s.id === serviceId);
+        return service ? service.name : 'Неизвестная услуга';
+    };
+    
+    // Получение цвета ячейки в зависимости от статуса записи
+    const getAppointmentColor = (status) => {
+        switch (status) {
+            case 'created': return 'rgba(33, 150, 243, 0.2)'; // Синий
+            case 'confirmed': return 'rgba(76, 175, 80, 0.2)'; // Зеленый
+            case 'completed': return 'rgba(76, 175, 80, 0.5)'; // Темно-зеленый
+            case 'cancelled': return 'rgba(244, 67, 54, 0.2)'; // Красный
+            default: return 'rgba(33, 150, 243, 0.2)';
+        }
+    };
+    
+    // Обработчик клика по ячейке для создания новой записи
+    const handleCellClick = (employeeId, timeSlot) => {
+        // Проверяем, работает ли сотрудник в это время
+        if (!isEmployeeWorking(employeeId, timeSlot)) return;
+        
+        // Проверяем, есть ли уже запись на это время
+        const existingAppointment = getAppointmentForSlot(employeeId, timeSlot);
+        if (existingAppointment) {
+            // Здесь можно добавить логику для редактирования существующей записи
+            return;
+        }
+        
+        // Открываем диалог для создания новой записи
+        setOpenDialog(true);
+        setNewRecord({
+            client_id: '',
+            service_id: '',
+            employee_id: employeeId,
+            date: format(selectedDate, 'yyyy-MM-dd'),
+            time: timeSlot,
+            status: 'created',
+            is_completed: false,
+            is_paid: false,
+            notes: ''
+        });
+        setAvailableEmployees([employees.find(emp => emp.id === employeeId)].filter(Boolean));
+        setServicePrice(null);
+    };
+    
+    // Переключение на предыдущий день
+    const handlePreviousDay = () => {
+        const prevDay = new Date(selectedDate);
+        prevDay.setDate(prevDay.getDate() - 1);
+        setSelectedDate(prevDay);
+    };
+    
+    // Переключение на следующий день
+    const handleNextDay = () => {
+        const nextDay = new Date(selectedDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        setSelectedDate(nextDay);
+    };
+    
+    // Переключение на текущий день
+    const handleToday = () => {
+        setSelectedDate(new Date());
+    };
+    
+    // Получение квалификаций для выбранной услуги
+    const fetchServiceQualifications = async (serviceId) => {
+        try {
+            const response = await fetch('http://localhost:5000/api/service_qualifications');
+            if (response.ok) {
+                const data = await response.json();
+                // Фильтруем только те записи, которые относятся к выбранной услуге
+                const filteredData = data.filter(item => item.service_id === serviceId);
+                setServiceQualifications(filteredData);
+                return filteredData;
+            }
+        } catch (error) {
+            console.error('Ошибка при получении квалификаций услуги:', error);
+        }
+        return [];
+    };
+
+    // Обновление списка доступных мастеров при выборе услуги
+    const updateAvailableEmployees = async (serviceId) => {
+        if (!serviceId) {
+            setAvailableEmployees([]);
+            setServicePrice(null);
+            return;
+        }
+
+        try {
+            // Получаем выбранную услугу
+            const selectedService = services.find(s => s.id === serviceId);
+            if (!selectedService) return;
+
+            // Получаем квалификации для услуги
+            const qualifications = await fetchServiceQualifications(serviceId);
+            
+            // Фильтруем сотрудников по специализации и квалификации
+            const filtered = employees.filter(emp => {
+                // Проверяем, что специализация сотрудника соответствует специализации услуги
+                if (emp.specialization_id !== selectedService.specialization_id) return false;
+                
+                // Проверяем, что квалификация сотрудника позволяет выполнять услугу
+                return qualifications.some(q => 
+                    q.qualification_id === emp.qualification_level_id && q.is_allowed
+                );
+            });
+            
+            setAvailableEmployees(filtered);
+            
+            // Сбрасываем выбранного мастера, если он не доступен для новой услуги
+            if (newRecord.employee_id && !filtered.some(emp => emp.id === newRecord.employee_id)) {
+                setNewRecord(prev => ({ ...prev, employee_id: '' }));
+                setServicePrice(null);
+            }
+        } catch (error) {
+            console.error('Ошибка при обновлении списка мастеров:', error);
+            setAvailableEmployees([]);
+        }
+    };
+
+    // Обновление цены услуги при выборе мастера
+    const updateServicePrice = (serviceId, employeeId) => {
+        if (!serviceId || !employeeId) {
+            setServicePrice(null);
+            return;
+        }
+
+        try {
+            // Получаем выбранную услугу
+            const selectedService = services.find(s => s.id === serviceId);
+            if (!selectedService) return;
+
+            // Получаем выбранного мастера
+            const selectedEmployee = employees.find(e => e.id === employeeId);
+            if (!selectedEmployee) return;
+
+            // Находим модификатор цены для квалификации мастера
+            const qualification = serviceQualifications.find(q => 
+                q.qualification_id === selectedEmployee.qualification_level_id
+            );
+
+            if (qualification) {
+                // Если есть модификатор цены, используем его
+                setServicePrice(qualification.price_modified || selectedService.base_price);
+            } else {
+                // Иначе используем базовую цену
+                setServicePrice(selectedService.base_price);
+            }
+        } catch (error) {
+            console.error('Ошибка при обновлении цены услуги:', error);
+            setServicePrice(null);
+        }
+    };
 
     const handleClientChange = (e) => {
         if (e.target.value === 'new') {
@@ -33,6 +396,18 @@ function APappointment({ records, clients, setClients, employees, services }) {
             setAddNewClient(false);
             setNewRecord(prev => ({ ...prev, client_id: e.target.value }));
         }
+    };
+
+    const handleServiceChange = (e) => {
+        const serviceId = e.target.value;
+        setNewRecord(prev => ({ ...prev, service_id: serviceId }));
+        updateAvailableEmployees(serviceId);
+    };
+
+    const handleEmployeeChange = (e) => {
+        const employeeId = e.target.value;
+        setNewRecord(prev => ({ ...prev, employee_id: employeeId }));
+        updateServicePrice(newRecord.service_id, employeeId);
     };
 
     const handleAddClient = async () => {
@@ -52,7 +427,10 @@ function APappointment({ records, clients, setClients, employees, services }) {
         }
     };
 
-    const filteredRecords = records.filter(record =>
+    // Проверяем, что records является массивом
+    const recordsArray = Array.isArray(records) ? records : [];
+
+    const filteredRecords = recordsArray.filter(record =>
         (record.name.toLowerCase().includes(filter.toLowerCase()) ||
             record.service.toLowerCase().includes(filter.toLowerCase()) ||
             record.master.toLowerCase().includes(filter.toLowerCase())) &&
@@ -63,6 +441,19 @@ function APappointment({ records, clients, setClients, employees, services }) {
 
     const handleOpenDialog = () => {
         setOpenDialog(true);
+        setNewRecord({
+            client_id: '',
+            service_id: '',
+            employee_id: '',
+            date: format(selectedDate, 'yyyy-MM-dd'),
+            time: '',
+            status: 'created',
+            is_completed: false,
+            is_paid: false,
+            notes: ''
+        });
+        setAvailableEmployees([]);
+        setServicePrice(null);
     };
 
     const handleCloseDialog = () => {
@@ -92,11 +483,12 @@ function APappointment({ records, clients, setClients, employees, services }) {
             client_id: clientId,
             service_id: newRecord.service_id,
             employee_id: newRecord.employee_id,
-            status: newRecord.status,
+            status: newRecord.status || 'created',
             datetime,
             is_completed: !!newRecord.is_completed,
             is_paid: !!newRecord.is_paid,
-            notes: newRecord.notes || ''
+            notes: newRecord.notes || '',
+            final_price: servicePrice
         };
         const resp = await fetch('http://localhost:5000/api/appointments', {
             method: 'POST',
@@ -105,18 +497,143 @@ function APappointment({ records, clients, setClients, employees, services }) {
         });
         if (resp.ok) {
             handleCloseDialog();
+            // Обновляем список записей
+            fetchAppointmentsForDate(selectedDate);
         } else {
             alert('Ошибка при создании записи');
         }
     };
 
+    // Проверяем, что services и employees являются массивами
+    const servicesArray = Array.isArray(services) ? services : [];
+
     return (
         <Box>
             <Typography variant="h6" align="center" gutterBottom>Управление записями</Typography>
-            <Button variant="contained" color="primary" onClick={handleOpenDialog} sx={{ mb: 2 }}>
-                Добавить запись
-            </Button>
-            <Dialog open={openDialog} onClose={handleCloseDialog}>
+            
+            {/* Панель управления датой */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <IconButton onClick={handlePreviousDay}>
+                        <NavigateBeforeIcon />
+                    </IconButton>
+                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
+                        <DatePicker
+                            value={selectedDate}
+                            onChange={setSelectedDate}
+                            renderInput={(params) => <TextField {...params} />}
+                        />
+                    </LocalizationProvider>
+                    <IconButton onClick={handleNextDay}>
+                        <NavigateNextIcon />
+                    </IconButton>
+                    <IconButton onClick={handleToday}>
+                        <TodayIcon />
+                    </IconButton>
+                </Box>
+                <Button 
+                    variant="contained" 
+                    startIcon={<AddIcon />} 
+                    onClick={handleOpenDialog}
+                >
+                    Добавить запись
+                </Button>
+            </Box>
+            
+            <TableContainer component={Paper} sx={{ mb: 4, overflow: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+                <Table stickyHeader size="small">
+                    <TableHead>
+                        <TableRow>
+                            <TableCell sx={{ minWidth: 60, maxWidth: 70, width: 65 }}>
+                                <Typography variant="subtitle1" fontWeight="bold">
+                                    Время
+                                </Typography>
+                            </TableCell>
+                            {filteredEmployees.map(employee => (
+                                <TableCell key={employee.id} align="center" sx={{ minWidth: 150 }}>
+                                    {employee.full_name}
+                                </TableCell>
+                            ))}
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {timeSlots.map(slot => (
+                            <TableRow key={slot}>
+                                <TableCell component="th" scope="row" sx={{ fontSize: '1.1rem', fontWeight: 'medium' }}>
+                                    {slot}
+                                </TableCell>
+                                {filteredEmployees.map(employee => {
+                                    const appointment = getAppointmentForSlot(employee.id, slot);
+                                    const isWorking = isEmployeeWorking(employee.id, slot);
+                                    const schedule = schedules.find(s => s.employee_id === employee.id);
+                                    const hasExceptions = schedule ? getExceptionsInfo(employee.id) : '';
+                                    
+                                    let tooltipText = '';
+                                    if (appointment) {
+                                        tooltipText = `Клиент: ${getClientName(appointment.client_id)}\nУслуга: ${getServiceName(appointment.service_id)}\nСтатус: ${appointment.status}`;
+                                    } else if (!isWorking && hasExceptions && isInException(schedule?.id, slot)) {
+                                        tooltipText = `Перерыв:\n${hasExceptions}`;
+                                    }
+                                    
+                                    return (
+                                        <TableCell 
+                                            key={employee.id} 
+                                            align="center" 
+                                            onClick={() => handleCellClick(employee.id, slot)}
+                                            sx={{ 
+                                                bgcolor: appointment 
+                                                    ? getAppointmentColor(appointment.status)
+                                                    : (isWorking ? 'rgba(255, 255, 255, 0.9)' : 
+                                                        (hasExceptions && isInException(schedule?.id, slot) 
+                                                            ? 'rgba(156, 39, 176, 0.15)' 
+                                                            : 'rgba(0, 0, 0, 0.04)')),
+                                                cursor: isWorking && !appointment ? 'pointer' : 'default',
+                                                '&:hover': {
+                                                    bgcolor: isWorking && !appointment 
+                                                        ? 'rgba(0, 0, 0, 0.08)' 
+                                                        : appointment 
+                                                            ? getAppointmentColor(appointment.status) 
+                                                            : (hasExceptions && isInException(schedule?.id, slot) 
+                                                                ? 'rgba(156, 39, 176, 0.25)' 
+                                                                : 'rgba(0, 0, 0, 0.04)')
+                                                }
+                                            }}
+                                        >
+                                            {appointment ? (
+                                                <Tooltip title={tooltipText} arrow placement="top">
+                                                    <Box>
+                                                        <Typography variant="caption" display="block">
+                                                            {getClientName(appointment.client_id)}
+                                                        </Typography>
+                                                        <Typography variant="caption" display="block">
+                                                            {getServiceName(appointment.service_id)}
+                                                        </Typography>
+                                                    </Box>
+                                                </Tooltip>
+                                            ) : (
+                                                hasExceptions && isInException(schedule?.id, slot) ? (
+                                                    <Tooltip title={tooltipText} arrow placement="top">
+                                                        <Box sx={{ 
+                                                            width: '80%', 
+                                                            height: '3px', 
+                                                            bgcolor: 'rgba(156, 39, 176, 0.6)',
+                                                            margin: '0 auto',
+                                                            borderRadius: '2px'
+                                                        }} />
+                                                    </Tooltip>
+                                                ) : null
+                                            )}
+                                        </TableCell>
+                                    );
+                                })}
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </TableContainer>
+            
+            {/* Диалог добавления/редактирования записи */}
+            <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md">
                 <DialogTitle>Добавить новую запись</DialogTitle>
                 <DialogContent>
                     <FormControl fullWidth margin="normal">
@@ -125,7 +642,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                             value={addNewClient ? 'new' : (newRecord.client_id || '')}
                             onChange={handleClientChange}
                         >
-                            {clients.map(client => (
+                            {clientsArray.map(client => (
                                 <MenuItem key={client.id} value={client.id}>{client.full_name}</MenuItem>
                             ))}
                             <MenuItem value="new">Добавить нового клиента</MenuItem>
@@ -169,9 +686,9 @@ function APappointment({ records, clients, setClients, employees, services }) {
                         <InputLabel>Услуга</InputLabel>
                         <Select
                             value={newRecord.service_id || ''}
-                            onChange={e => setNewRecord({ ...newRecord, service_id: e.target.value })}
+                            onChange={handleServiceChange}
                         >
-                            {services.map(service => (
+                            {servicesArray.map(service => (
                                 <MenuItem key={service.id} value={service.id}>{service.name}</MenuItem>
                             ))}
                         </Select>
@@ -180,13 +697,19 @@ function APappointment({ records, clients, setClients, employees, services }) {
                         <InputLabel>Мастер</InputLabel>
                         <Select
                             value={newRecord.employee_id || ''}
-                            onChange={e => setNewRecord({ ...newRecord, employee_id: e.target.value })}
+                            onChange={handleEmployeeChange}
+                            disabled={!newRecord.service_id}
                         >
-                            {employees.map(emp => (
+                            {availableEmployees.map(emp => (
                                 <MenuItem key={emp.id} value={emp.id}>{emp.full_name}</MenuItem>
                             ))}
                         </Select>
                     </FormControl>
+                    {servicePrice !== null && (
+                        <Typography variant="subtitle1" sx={{ mt: 1, color: 'primary.main' }}>
+                            Стоимость услуги: {servicePrice} руб.
+                        </Typography>
+                    )}
                     <TextField
                         label="Дата"
                         type="date"
@@ -208,7 +731,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                     <FormControl fullWidth margin="normal">
                         <InputLabel>Статус</InputLabel>
                         <Select
-                            value={newRecord.status || ''}
+                            value={newRecord.status || 'created'}
                             onChange={e => setNewRecord({ ...newRecord, status: e.target.value })}
                         >
                             <MenuItem value="created">Создана</MenuItem>
@@ -248,80 +771,6 @@ function APappointment({ records, clients, setClients, employees, services }) {
                     <Button onClick={handleAddRecord} color="primary">Добавить</Button>
                 </DialogActions>
             </Dialog>
-            <Box sx={{ position: 'sticky', top: 0, backgroundColor: '#F8F9FA', zIndex: 1, padding: 2 }}>
-                <TextField
-                    label="Поиск"
-                    variant="outlined"
-                    fullWidth
-                    margin="normal"
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                />
-                <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                    <FormControl fullWidth>
-                        <InputLabel>Услуга</InputLabel>
-                        <Select
-                            value={serviceFilter}
-                            onChange={(e) => setServiceFilter(e.target.value)}
-                        >
-                            <MenuItem value="">Все</MenuItem>
-                            {[...new Set(records.map(record => record.service))].map(service => (
-                                <MenuItem key={service} value={service}>{service}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                    <FormControl fullWidth>
-                        <InputLabel>Мастер</InputLabel>
-                        <Select
-                            value={masterFilter}
-                            onChange={(e) => setMasterFilter(e.target.value)}
-                        >
-                            <MenuItem value="">Все</MenuItem>
-                            {[...new Set(records.map(record => record.master))].map(master => (
-                                <MenuItem key={master} value={master}>{master}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                    <FormControl fullWidth>
-                        <InputLabel>Статус</InputLabel>
-                        <Select
-                            value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value)}
-                        >
-                            <MenuItem value="">Все</MenuItem>
-                            {[...new Set(records.map(record => record.status))].map(status => (
-                                <MenuItem key={status} value={status}>{status}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                </Box>
-            </Box>
-            <TableContainer component={Paper} sx={{ maxHeight: 400, overflow: 'auto', mt: 2 }}>
-                <Table stickyHeader>
-                    <TableHead>
-                        <TableRow>
-                            <TableCell>Имя клиента</TableCell>
-                            <TableCell>Услуга</TableCell>
-                            <TableCell>Дата</TableCell>
-                            <TableCell>Время</TableCell>
-                            <TableCell>Мастер</TableCell>
-                            <TableCell>Статус</TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                        {filteredRecords.map((record) => (
-                            <TableRow key={record.id}>
-                                <TableCell>{record.name}</TableCell>
-                                <TableCell>{record.service}</TableCell>
-                                <TableCell>{record.date}</TableCell>
-                                <TableCell>{record.time}</TableCell>
-                                <TableCell>{record.master}</TableCell>
-                                <TableCell>{record.status}</TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </TableContainer>
         </Box>
     );
 }
