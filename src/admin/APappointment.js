@@ -2,18 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { Typography, Box, Button, TextField, TableContainer, 
     Paper, Table, TableHead, TableRow, TableCell, TableBody, Select, MenuItem, 
     FormControl, InputLabel, Dialog, DialogActions, DialogContent, DialogTitle, 
-    FormControlLabel, Checkbox, Grid, Tooltip, IconButton, Divider } from '@mui/material';
+    FormControlLabel, Checkbox, Grid, Tooltip, IconButton, Divider, Snackbar, Alert} from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { ru } from 'date-fns/locale';
-import { format, addMinutes, parseISO, isWithinInterval } from 'date-fns';
+import { format, addMinutes, parseISO, isWithinInterval, addDays } from 'date-fns';
 import AddIcon from '@mui/icons-material/Add';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import TodayIcon from '@mui/icons-material/Today';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 function APappointment({ records, clients, setClients, employees, services }) {
+    
     const [openDialog, setOpenDialog] = useState(false);
     const [filter, setFilter] = useState('');
     const [serviceFilter, setServiceFilter] = useState('');
@@ -29,6 +32,11 @@ function APappointment({ records, clients, setClients, employees, services }) {
         is_completed: false,
         is_paid: false,
         notes: ''
+    });
+    const [snackbar, setSnackbar] = useState({
+        open: false,
+        message: '',
+        severity: 'info'
     });
     const [addNewClient, setAddNewClient] = useState(false);
     const [newClient, setNewClient] = useState({
@@ -52,6 +60,52 @@ function APappointment({ records, clients, setClients, employees, services }) {
     
     // Проверяем, что clients является массивом
     const clientsArray = Array.isArray(clients) ? clients : [];
+    
+    // Функция для проверки доступности временного слота
+    const isTimeSlotAvailable = (employeeId, timeSlot, excludeAppointmentId = null) => {
+        // Проверяем, работает ли сотрудник в это время
+        if (!isEmployeeWorking(employeeId, timeSlot)) return false;
+        
+        // Проверяем, есть ли уже запись на это время
+        const existingAppointment = getAppointmentForSlot(employeeId, timeSlot);
+        
+        // Если запись есть, но это та же запись, которую мы редактируем, считаем слот доступным
+        if (existingAppointment && excludeAppointmentId && existingAppointment.id === excludeAppointmentId) {
+            return true;
+        }
+        
+        // Слот доступен, если на него нет записи
+        return !existingAppointment;
+    };
+    
+    // Функция для проверки доступности временного диапазона для записи
+    const checkTimeRangeAvailability = (employeeId, startTime, duration, excludeAppointmentId = null) => {
+        if (!startTime || !duration) return false;
+        
+        // Преобразуем время начала в объект Date
+        const startDateTime = new Date(`${newRecord.date}T${startTime}:00`);
+        
+        // Проверяем каждый 15-минутный слот в диапазоне продолжительности услуги
+        let currentSlot = startDateTime;
+        const endDateTime = addMinutes(startDateTime, duration);
+        
+        while (currentSlot < endDateTime) {
+            const timeSlot = format(currentSlot, 'HH:mm');
+            if (!isTimeSlotAvailable(employeeId, timeSlot, excludeAppointmentId)) {
+                return false;
+            }
+            currentSlot = addMinutes(currentSlot, 15);
+        }
+        
+        return true;
+    };
+
+    // Новые состояния для редактирования и удаления
+    const [editMode, setEditMode] = useState(false);
+    const [currentAppointment, setCurrentAppointment] = useState(null);
+    const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+    const [appointmentToDelete, setAppointmentToDelete] = useState(null);
+    const [hoveredCell, setHoveredCell] = useState(null);
     
     // Загрузка расписаний и записей при изменении даты
     useEffect(() => {
@@ -216,15 +270,84 @@ function APappointment({ records, clients, setClients, employees, services }) {
     
     // Получение записей для определенного временного слота и сотрудника
     const getAppointmentForSlot = (employeeId, timeSlot) => {
+        // Получаем начало и конец текущего временного слота
+        const slotStartTime = new Date(`${format(selectedDate, 'yyyy-MM-dd')}T${timeSlot}:00`);
+        const slotEndTime = addMinutes(slotStartTime, 15);
+        
+        // Проверяем, попадает ли слот в какую-либо запись с учетом продолжительности услуги
         return appointments.find(appointment => {
             if (appointment.employee_id !== employeeId) return false;
             
-            const appointmentTime = appointment.datetime ? 
-                format(new Date(appointment.datetime), 'HH:mm') : '';
+            // Получаем время записи
+            const appointmentDateTime = appointment.datetime ? new Date(appointment.datetime) : null;
+            if (!appointmentDateTime) return false;
             
-            return appointmentTime === timeSlot;
+            // Находим услугу для определения продолжительности
+            const service = services.find(s => s.id === appointment.service_id);
+            if (!service) return false;
+            
+            // Вычисляем время окончания записи с учетом продолжительности услуги
+            const appointmentEndTime = addMinutes(appointmentDateTime, service.duration);
+            
+            // Проверяем, перекрывается ли текущий слот с записью
+            return (
+                // Слот начинается во время записи
+                (slotStartTime >= appointmentDateTime && slotStartTime < appointmentEndTime) ||
+                // Слот заканчивается во время записи
+                (slotEndTime > appointmentDateTime && slotEndTime <= appointmentEndTime) ||
+                // Запись полностью содержит слот
+                (slotStartTime <= appointmentDateTime && slotEndTime >= appointmentEndTime)
+            );
         });
     };
+
+    // Получение подробной информации о записи для тултипа
+const getAppointmentDetailsForTooltip = (appointment) => {
+    if (!appointment) return '';
+    
+    // Находим информацию о клиенте
+    const client = clientsArray.find(c => c.id === appointment.client_id);
+    // Находим информацию о услуге
+    const service = services.find(s => s.id === appointment.service_id);
+    
+    // Форматируем время
+    const appointmentTime = appointment.datetime ? 
+        format(new Date(appointment.datetime), 'HH:mm') : 'Не указано';
+    
+    // Форматируем статус
+    const statusLabels = {
+        'created': 'Создана',
+        'confirmed': 'Подтверждена',
+        'completed': 'Завершена',
+        'cancelled': 'Отменена'
+    };
+    
+    // Собираем информацию
+    const details = [
+        `Клиент: ${client ? client.full_name : 'Не указан'}`,
+        `Телефон: ${client && client.phone ? client.phone : 'Не указан'}`,
+        `Услуга: ${service ? service.name : 'Не указана'}`,
+        `Время: ${appointmentTime}`,
+        `Длительность: ${service ? service.duration + ' мин.' : 'Не указана'}`,
+        `Статус: ${statusLabels[appointment.status] || appointment.status}`,
+        `Оплачено: ${appointment.is_paid ? 'Да' : 'Нет'}`,
+        `Завершено: ${appointment.is_completed ? 'Да' : 'Нет'}`
+    ];
+    
+    // Добавляем цену, если она указана
+    if (service && service.price) {
+        details.push(`Цена: ${service.price} ₽`);
+    } else if (appointment.final_price) {
+        details.push(`Цена: ${appointment.final_price} ₽`);
+    }
+    
+    // Добавляем примечания, если они есть
+    if (appointment.notes && appointment.notes.trim()) {
+        details.push(`Примечания: ${appointment.notes}`);
+    }
+    
+    return details.join('\n');
+};
     
     // Получение информации о клиенте по ID
     const getClientName = (clientId) => {
@@ -248,35 +371,445 @@ function APappointment({ records, clients, setClients, employees, services }) {
             default: return 'rgba(33, 150, 243, 0.2)';
         }
     };
+
+    // Обработчик изменения даты
+    const handleDateChange = (newDate) => {
+        setSelectedDate(newDate);
+        // При изменении даты перезагружаем расписания и записи
+        fetchSchedulesForDate(newDate);
+        fetchAppointmentsForDate(newDate);
+    };
     
     // Обработчик клика по ячейке для создания новой записи
-    const handleCellClick = (employeeId, timeSlot) => {
-        // Проверяем, работает ли сотрудник в это время
-        if (!isEmployeeWorking(employeeId, timeSlot)) return;
+const handleCellClick = (employeeId, timeSlot) => {
+    // Проверяем, работает ли сотрудник в это время
+    if (!isEmployeeWorking(employeeId, timeSlot)) return;
+    
+    // Проверяем, есть ли уже запись на это время
+    const existingAppointment = getAppointmentForSlot(employeeId, timeSlot);
+    if (existingAppointment) {
+        // Открываем диалог для редактирования существующей записи
+        handleEditAppointment(existingAppointment);
+        return;
+    }
+    
+    // Открываем диалог для создания новой записи
+    setOpenDialog(true);
+    setEditMode(false);
+    setNewRecord({
+        client_id: '',
+        service_id: '',
+        employee_id: employeeId,
+        date: format(selectedDate, 'yyyy-MM-dd'),
+        time: timeSlot,
+        status: 'created',
+        is_completed: false,
+        is_paid: false,
+        notes: ''
+    });
+    setAvailableEmployees([employees.find(emp => emp.id === employeeId)].filter(Boolean));
+    setServicePrice(null);
+};
+    
+    // Обработчик редактирования записи
+    const handleEditAppointment = (appointment) => {
+        setEditMode(true);
+        setCurrentAppointment(appointment);
         
-        // Проверяем, есть ли уже запись на это время
-        const existingAppointment = getAppointmentForSlot(employeeId, timeSlot);
-        if (existingAppointment) {
-            // Здесь можно добавить логику для редактирования существующей записи
+        // Получаем дату и время из datetime
+        const appointmentDate = new Date(appointment.datetime);
+        
+        setNewRecord({
+            id: appointment.id,
+            client_id: appointment.client_id,
+            service_id: appointment.service_id,
+            employee_id: appointment.employee_id,
+            date: format(appointmentDate, 'yyyy-MM-dd'),
+            time: format(appointmentDate, 'HH:mm'),
+            status: appointment.status,
+            is_completed: appointment.is_completed,
+            is_paid: appointment.is_paid,
+            notes: appointment.notes || ''
+        });
+        
+        // Устанавливаем выбранного мастера в список доступных мастеров
+        const selectedEmployee = employees.find(emp => emp.id === appointment.employee_id);
+        if (selectedEmployee) {
+            setAvailableEmployees([selectedEmployee]);
+        }
+        
+        // Если есть связанная услуга, устанавливаем её цену
+        const service = services.find(s => s.id === appointment.service_id);
+        if (service) {
+            setServicePrice(service.base_price);
+        }
+        
+        setOpenDialog(true);
+    };
+    
+    // Обработчик удаления записи
+    const handleDeleteAppointment = (appointment) => {
+        setAppointmentToDelete(appointment);
+        setOpenDeleteDialog(true);
+    };
+    
+    // Подтверждение удаления записи
+    const confirmDeleteAppointment = async () => {
+        try {
+            const response = await fetch(`http://localhost:5000/api/appointments/${appointmentToDelete.id}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (response.ok) {
+                // Обновляем список записей
+                setAppointments(appointments.filter(app => app.id !== appointmentToDelete.id));
+                setOpenDeleteDialog(false);
+                setAppointmentToDelete(null);
+            } else {
+                alert('Ошибка при удалении записи');
+            }
+        } catch (error) {
+            console.error('Ошибка при удалении записи:', error);
+            alert('Ошибка при удалении записи');
+        }
+    };
+    
+    // Обработчик наведения мыши на ячейку
+    const handleCellMouseEnter = (employeeId, timeSlot) => {
+        const appointment = getAppointmentForSlot(employeeId, timeSlot);
+        if (appointment) {
+            setHoveredCell(`${employeeId}-${timeSlot}`);
+        }
+    };
+    
+    // Обработчик ухода мыши с ячейки
+    const handleCellMouseLeave = () => {
+        setHoveredCell(null);
+    };
+    
+    // Обработчик сохранения записи (создание или редактирование)
+    const handleSaveAppointment = async () => {
+        try {
+            // Формируем данные для отправки
+            const appointmentData = {
+                client_id: newRecord.client_id,
+                service_id: newRecord.service_id,
+                employee_id: newRecord.employee_id,
+                datetime: `${newRecord.date}T${newRecord.time}:00`,
+                status: newRecord.status,
+                is_completed: newRecord.is_completed,
+                is_paid: newRecord.is_paid,
+                notes: newRecord.notes
+            };
+            
+            let response;
+            
+            if (editMode) {
+                // Редактирование существующей записи
+                response = await fetch(`http://localhost:5000/api/appointments/${newRecord.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(appointmentData)
+                });
+            } else {
+                // Создание новой записи
+                response = await fetch('http://localhost:5000/api/appointments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(appointmentData)
+                });
+            }
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                if (editMode) {
+                    // Обновляем запись в списке
+                    setAppointments(appointments.map(app => 
+                        app.id === data.id ? data : app
+                    ));
+                } else {
+                    // Добавляем новую запись в список
+                    setAppointments([...appointments, data]);
+                }
+                
+                setOpenDialog(false);
+                setEditMode(false);
+                setCurrentAppointment(null);
+            } else {
+                alert(`Ошибка при ${editMode ? 'обновлении' : 'создании'} записи`);
+            }
+        } catch (error) {
+            console.error(`Ошибка при ${editMode ? 'обновлении' : 'создании'} записи:`, error);
+            alert(`Ошибка при ${editMode ? 'обновлении' : 'создании'} записи`);
+        }
+    };
+
+    const [appointmentError, setAppointmentError] = useState(null);
+const [conflictAppointment, setConflictAppointment] = useState(null);
+
+// Функция для обработки создания новой записи
+const handleCreateAppointment = async () => {
+    try {
+        // Сбрасываем предыдущие ошибки
+        setAppointmentError(null);
+        setConflictAppointment(null);
+        
+        // Проверяем, что выбраны все необходимые поля
+        if (!newRecord.client_id || !newRecord.service_id || !newRecord.employee_id || !newRecord.date || !newRecord.time) {
+            setAppointmentError('Пожалуйста, заполните все обязательные поля');
             return;
         }
         
-        // Открываем диалог для создания новой записи
-        setOpenDialog(true);
-        setNewRecord({
-            client_id: '',
-            service_id: '',
-            employee_id: employeeId,
-            date: format(selectedDate, 'yyyy-MM-dd'),
-            time: timeSlot,
-            status: 'created',
-            is_completed: false,
-            is_paid: false,
-            notes: ''
+        // Формируем объект для отправки на сервер
+        const appointmentData = {
+            client_id: newRecord.client_id,
+            service_id: newRecord.service_id,
+            employee_id: newRecord.employee_id,
+            datetime: `${newRecord.date}T${newRecord.time}:00`,
+            status: newRecord.status,
+            is_completed: newRecord.is_completed,
+            is_paid: newRecord.is_paid,
+            notes: newRecord.notes || ''
+        };
+        
+        // Определяем URL и метод запроса в зависимости от режима (создание или редактирование)
+        const url = editMode ? `http://localhost:5000/api/appointments/${currentAppointment.id}` : 'http://localhost:5000/api/appointments';
+        const method = editMode ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(appointmentData)
         });
-        setAvailableEmployees([employees.find(emp => emp.id === employeeId)].filter(Boolean));
-        setServicePrice(null);
-    };
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Обрабатываем разные типы ошибок конфликтов
+            if (response.status === 409) {
+                setAppointmentError(data.error);
+                
+                // Если конфликт с другой записью, сохраняем ID конфликтующей записи
+                if (data.conflict_appointment_id) {
+                    // Загружаем подробную информацию о конфликтующей записи
+                    const conflictResponse = await fetch(`http://localhost:5000/api/appointments/${data.conflict_appointment_id}`);
+                    if (conflictResponse.ok) {
+                        const conflictData = await conflictResponse.json();
+                        setConflictAppointment(conflictData);
+                    }
+                }
+            } else {
+                setAppointmentError(data.error || 'Произошла ошибка при создании записи');
+            }
+            return;
+        }
+        
+        // Закрываем диалог и обновляем данные при успешном создании/редактировании
+        setOpenDialog(false);
+        fetchAppointmentsForDate(selectedDate);
+        
+        // Показываем уведомление об успешном выполнении
+        showSnackbar(
+            editMode ? 'Запись успешно обновлена' : 'Запись успешно создана', 
+            'success'
+        );
+        
+        // Сбрасываем значения формы
+        resetForm();
+    } catch (error) {
+        console.error('Ошибка при создании/обновлении записи:', error);
+        setAppointmentError('Произошла ошибка при взаимодействии с сервером');
+    }
+};
+
+// Функция для показа уведомления (если ее еще нет, добавляем)
+const showSnackbar = (message, severity = 'info') => {
+    setSnackbar({
+        open: true,
+        message,
+        severity
+    });
+};
+
+// Функция для закрытия уведомления
+const handleCloseSnackbar = () => {
+    setSnackbar({
+        ...snackbar,
+        open: false
+    });
+};
+
+// Функция для сброса формы
+const resetForm = () => {
+    setNewRecord({
+        client_id: '',
+        service_id: '',
+        employee_id: '',
+        date: '',
+        time: '',
+        status: 'created',
+        is_completed: false,
+        is_paid: false,
+        notes: ''
+    });
+    setAppointmentError(null);
+    setConflictAppointment(null);
+    setEditMode(false);
+    setCurrentAppointment(null);
+};
+
+    // Функция для отображения содержимого ячейки
+const renderTableCell = (employeeId, timeSlot) => {
+    // Получаем запись для данного временного слота и сотрудника
+    const appointment = getAppointmentForSlot(employeeId, timeSlot);
+    
+    // Если нет записи, просто отображаем пустую ячейку
+    if (!appointment) {
+        return (
+            <TableCell 
+                key={`${employeeId}-${timeSlot}`}
+                sx={{
+                    backgroundColor: isEmployeeWorking(employeeId, timeSlot) 
+                        ? 'white' 
+                        : 'rgba(0, 0, 0, 0.05)',
+                    cursor: isEmployeeWorking(employeeId, timeSlot) ? 'pointer' : 'default',
+                    padding: '4px 8px',
+                    height: '40px',
+                    borderBottom: '1px solid rgba(224, 224, 224, 1)'
+                }}
+                onClick={() => handleCellClick(employeeId, timeSlot)}
+            />
+        );
+    }
+    
+    // Определяем, является ли эта ячейка началом записи
+    const isAppointmentStart = appointment.datetime && 
+        format(new Date(appointment.datetime), 'HH:mm') === timeSlot;
+    
+    // Если это не начало записи, возвращаем null - эта ячейка будет перекрыта rowSpan
+    if (!isAppointmentStart) {
+        return null;
+    }
+    
+    // Для начала записи определяем длительность услуги и сколько слотов она занимает
+    const service = services.find(s => s.id === appointment.service_id);
+    if (!service) {
+        return (
+            <TableCell 
+                key={`${employeeId}-${timeSlot}`}
+                sx={{
+                    backgroundColor: getAppointmentColor(appointment.status),
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    height: '40px',
+                    borderBottom: '1px solid rgba(224, 224, 224, 1)'
+                }}
+                onClick={() => handleCellClick(employeeId, timeSlot)}
+            >
+                <Typography variant="caption">Ошибка: услуга не найдена</Typography>
+            </TableCell>
+        );
+    }
+    
+    // Вычисляем количество 15-минутных слотов, которые займет услуга
+    const rowSpan = Math.ceil(service.duration / 15);
+    
+    // Находим информацию о клиенте
+    const client = clientsArray.find(c => c.id === appointment.client_id);
+    
+    return (
+        <TableCell 
+            key={`${employeeId}-${timeSlot}`}
+            rowSpan={rowSpan}
+            sx={{
+                backgroundColor: getAppointmentColor(appointment.status),
+                cursor: 'pointer',
+                position: 'relative',
+                border: '2px solid rgba(0, 0, 0, 0.2)',
+                padding: '4px 8px',
+                verticalAlign: 'top'
+            }}
+            onClick={() => handleCellClick(employeeId, timeSlot)}
+            onMouseEnter={() => setHoveredCell(`${employeeId}-${timeSlot}`)}
+            onMouseLeave={() => setHoveredCell(null)}
+        >
+            <Tooltip 
+                title={getAppointmentDetailsForTooltip(appointment)} 
+                arrow
+                placement="top"
+                componentsProps={{
+                    tooltip: {
+                        sx: {
+                            bgcolor: 'rgba(97, 97, 97, 0.9)',
+                            whiteSpace: 'pre-line'
+                        },
+                    },
+                }}
+            >
+                <Box>
+                    <Typography variant="caption" component="div" sx={{ fontWeight: 'bold' }}>
+                        {client ? client.full_name : 'Нет клиента'}
+                    </Typography>
+                    <Typography variant="caption" component="div" noWrap>
+                        {service.name}
+                    </Typography>
+                    <Typography variant="caption" component="div" sx={{ color: 'text.secondary' }}>
+                        {format(new Date(appointment.datetime), 'HH:mm')} 
+                        - 
+                        {format(addMinutes(new Date(appointment.datetime), service.duration), 'HH:mm')}
+                    </Typography>
+                </Box>
+            </Tooltip>
+            {hoveredCell === `${employeeId}-${timeSlot}` && (
+                <Box 
+                    sx={{
+                        position: 'absolute',
+                        top: '2px',
+                        right: '2px',
+                        display: 'flex',
+                        gap: '2px'
+                    }}
+                >
+                    <IconButton 
+                        size="small" 
+                        sx={{ 
+                            bgcolor: 'rgba(255, 255, 255, 0.7)', 
+                            width: 20, 
+                            height: 20,
+                            '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.9)' }
+                        }}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditAppointment(appointment);
+                        }}
+                    >
+                        <EditIcon fontSize="small" sx={{ fontSize: 14 }} />
+                    </IconButton>
+                    <IconButton 
+                        size="small" 
+                        sx={{ 
+                            bgcolor: 'rgba(255, 255, 255, 0.7)', 
+                            width: 20, 
+                            height: 20,
+                            '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.9)' }
+                        }}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setAppointmentToDelete(appointment);
+                            setOpenDeleteDialog(true);
+                        }}
+                    >
+                        <DeleteIcon fontSize="small" sx={{ fontSize: 14 }} />
+                    </IconButton>
+                </Box>
+            )}
+        </TableCell>
+    );
+};
     
     // Переключение на предыдущий день
     const handlePreviousDay = () => {
@@ -315,44 +848,54 @@ function APappointment({ records, clients, setClients, employees, services }) {
     };
 
     // Обновление списка доступных мастеров при выборе услуги
-    const updateAvailableEmployees = async (serviceId) => {
-        if (!serviceId) {
-            setAvailableEmployees([]);
+const updateAvailableEmployees = async (serviceId) => {
+    if (!serviceId) {
+        setAvailableEmployees([]);
+        setServicePrice(null);
+        return;
+    }
+
+    try {
+        // Получаем выбранную услугу
+        const selectedService = services.find(s => s.id === serviceId);
+        if (!selectedService) return;
+
+        // Получаем квалификации для услуги
+        const qualifications = await fetchServiceQualifications(serviceId);
+        
+        // Фильтруем сотрудников по специализации и квалификации
+        const filtered = employees.filter(emp => {
+            // Проверяем, что специализация сотрудника соответствует специализации услуги
+            if (emp.specialization_id !== selectedService.specialization_id) return false;
+            
+            // Проверяем, что квалификация сотрудника позволяет выполнять услугу
+            return qualifications.some(q => 
+                q.qualification_id === emp.qualification_level_id && q.is_allowed
+            );
+        });
+        
+        // Дополнительно проверяем доступность временного диапазона для каждого сотрудника
+        const availableEmps = filtered.filter(emp => {
+            return checkTimeRangeAvailability(
+                emp.id, 
+                newRecord.time, 
+                selectedService.duration,
+                editMode ? newRecord.id : null
+            );
+        });
+        
+        setAvailableEmployees(availableEmps);
+        
+        // Сбрасываем выбранного мастера, если он не доступен для новой услуги
+        if (newRecord.employee_id && !availableEmps.some(emp => emp.id === newRecord.employee_id)) {
+            setNewRecord(prev => ({ ...prev, employee_id: '' }));
             setServicePrice(null);
-            return;
         }
-
-        try {
-            // Получаем выбранную услугу
-            const selectedService = services.find(s => s.id === serviceId);
-            if (!selectedService) return;
-
-            // Получаем квалификации для услуги
-            const qualifications = await fetchServiceQualifications(serviceId);
-            
-            // Фильтруем сотрудников по специализации и квалификации
-            const filtered = employees.filter(emp => {
-                // Проверяем, что специализация сотрудника соответствует специализации услуги
-                if (emp.specialization_id !== selectedService.specialization_id) return false;
-                
-                // Проверяем, что квалификация сотрудника позволяет выполнять услугу
-                return qualifications.some(q => 
-                    q.qualification_id === emp.qualification_level_id && q.is_allowed
-                );
-            });
-            
-            setAvailableEmployees(filtered);
-            
-            // Сбрасываем выбранного мастера, если он не доступен для новой услуги
-            if (newRecord.employee_id && !filtered.some(emp => emp.id === newRecord.employee_id)) {
-                setNewRecord(prev => ({ ...prev, employee_id: '' }));
-                setServicePrice(null);
-            }
-        } catch (error) {
-            console.error('Ошибка при обновлении списка мастеров:', error);
-            setAvailableEmployees([]);
-        }
-    };
+    } catch (error) {
+        console.error('Ошибка при обновлении списка мастеров:', error);
+        setAvailableEmployees([]);
+    }
+};
 
     // Обновление цены услуги при выборе мастера
     const updateServicePrice = (serviceId, employeeId) => {
@@ -458,7 +1001,27 @@ function APappointment({ records, clients, setClients, employees, services }) {
 
     const handleCloseDialog = () => {
         setOpenDialog(false);
+        setEditMode(false);
+        setCurrentAppointment(null);
+        setNewRecord({
+            client_id: '',
+            service_id: '',
+            employee_id: '',
+            date: '',
+            time: '',
+            status: 'created',
+            is_completed: false,
+            is_paid: false,
+            notes: ''
+        });
+        resetForm();
     };
+
+    // Обновляем функцию отправки формы
+const handleSubmit = (e) => {
+    e.preventDefault();
+    handleCreateAppointment();
+};
 
     const handleAddRecord = async () => {
         let clientId = newRecord.client_id;
@@ -540,102 +1103,65 @@ function APappointment({ records, clients, setClients, employees, services }) {
                 </Button>
             </Box>
             
-            <TableContainer component={Paper} sx={{ mb: 4, overflow: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+            {/* Таблица с записями */}
+            <TableContainer component={Paper} sx={{ maxHeight: 'calc(100vh - 250px)', overflow: 'auto' }}>
                 <Table stickyHeader size="small">
                     <TableHead>
                         <TableRow>
-                            <TableCell sx={{ minWidth: 60, maxWidth: 70, width: 65 }}>
-                                <Typography variant="subtitle1" fontWeight="bold">
-                                    Время
-                                </Typography>
-                            </TableCell>
+                            <TableCell sx={{ minWidth: 80, fontWeight: 'bold' }}>Время</TableCell>
                             {filteredEmployees.map(employee => (
-                                <TableCell key={employee.id} align="center" sx={{ minWidth: 150 }}>
-                                    {employee.full_name}
+                                <TableCell 
+                                    key={employee.id} 
+                                    align="center"
+                                    sx={{ minWidth: 150, fontWeight: 'bold' }}
+                                >
+                                    <Tooltip 
+                                        title={getExceptionsInfo(employee.id)} 
+                                        arrow
+                                        placement="top"
+                                        componentsProps={{
+                                            tooltip: {
+                                                sx: {
+                                                    bgcolor: 'rgba(97, 97, 97, 0.9)',
+                                                    whiteSpace: 'pre-line',
+                                                    display: getExceptionsInfo(employee.id) ? 'block' : 'none'
+                                                },
+                                            },
+                                        }}
+                                    >
+                                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            {employee.full_name}
+                                        </Box>
+                                    </Tooltip>
                                 </TableCell>
                             ))}
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {timeSlots.map(slot => (
-                            <TableRow key={slot}>
-                                <TableCell component="th" scope="row" sx={{ fontSize: '1.1rem', fontWeight: 'medium' }}>
-                                    {slot}
-                                </TableCell>
-                                {filteredEmployees.map(employee => {
-                                    const appointment = getAppointmentForSlot(employee.id, slot);
-                                    const isWorking = isEmployeeWorking(employee.id, slot);
-                                    const schedule = schedules.find(s => s.employee_id === employee.id);
-                                    const hasExceptions = schedule ? getExceptionsInfo(employee.id) : '';
-                                    
-                                    let tooltipText = '';
-                                    if (appointment) {
-                                        tooltipText = `Клиент: ${getClientName(appointment.client_id)}\nУслуга: ${getServiceName(appointment.service_id)}\nСтатус: ${appointment.status}`;
-                                    } else if (!isWorking && hasExceptions && isInException(schedule?.id, slot)) {
-                                        tooltipText = `Перерыв:\n${hasExceptions}`;
-                                    }
-                                    
-                                    return (
-                                        <TableCell 
-                                            key={employee.id} 
-                                            align="center" 
-                                            onClick={() => handleCellClick(employee.id, slot)}
-                                            sx={{ 
-                                                bgcolor: appointment 
-                                                    ? getAppointmentColor(appointment.status)
-                                                    : (isWorking ? 'rgba(255, 255, 255, 0.9)' : 
-                                                        (hasExceptions && isInException(schedule?.id, slot) 
-                                                            ? 'rgba(156, 39, 176, 0.15)' 
-                                                            : 'rgba(0, 0, 0, 0.04)')),
-                                                cursor: isWorking && !appointment ? 'pointer' : 'default',
-                                                '&:hover': {
-                                                    bgcolor: isWorking && !appointment 
-                                                        ? 'rgba(0, 0, 0, 0.08)' 
-                                                        : appointment 
-                                                            ? getAppointmentColor(appointment.status) 
-                                                            : (hasExceptions && isInException(schedule?.id, slot) 
-                                                                ? 'rgba(156, 39, 176, 0.25)' 
-                                                                : 'rgba(0, 0, 0, 0.04)')
-                                                }
-                                            }}
-                                        >
-                                            {appointment ? (
-                                                <Tooltip title={tooltipText} arrow placement="top">
-                                                    <Box>
-                                                        <Typography variant="caption" display="block">
-                                                            {getClientName(appointment.client_id)}
-                                                        </Typography>
-                                                        <Typography variant="caption" display="block">
-                                                            {getServiceName(appointment.service_id)}
-                                                        </Typography>
-                                                    </Box>
-                                                </Tooltip>
-                                            ) : (
-                                                hasExceptions && isInException(schedule?.id, slot) ? (
-                                                    <Tooltip title={tooltipText} arrow placement="top">
-                                                        <Box sx={{ 
-                                                            width: '80%', 
-                                                            height: '3px', 
-                                                            bgcolor: 'rgba(156, 39, 176, 0.6)',
-                                                            margin: '0 auto',
-                                                            borderRadius: '2px'
-                                                        }} />
-                                                    </Tooltip>
-                                                ) : null
-                                            )}
-                                        </TableCell>
-                                    );
-                                })}
-                            </TableRow>
-                        ))}
-                    </TableBody>
+                    {timeSlots.map(timeSlot => (
+                        <TableRow key={timeSlot}>
+                            <TableCell sx={{ fontWeight: 'bold', width: '80px' }}>
+                                {timeSlot}
+                            </TableCell>
+                            {filteredEmployees.map(employee => {
+                                const cellContent = renderTableCell(employee.id, timeSlot);
+                                // Если renderTableCell вернул null, значит эта ячейка должна быть пропущена
+                                // (является продолжением предыдущей записи)
+                                return cellContent !== null ? cellContent : <React.Fragment key={`${employee.id}-${timeSlot}-empty`} />;
+                            })}
+                        </TableRow>
+                    ))}
+                </TableBody>
                 </Table>
             </TableContainer>
             
             {/* Диалог добавления/редактирования записи */}
-            <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md">
-                <DialogTitle>Добавить новую запись</DialogTitle>
-                <DialogContent>
+            <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
+                <DialogTitle>
+                    {editMode ? 'Редактировать запись' : 'Создать новую запись'}
+                </DialogTitle>
+                <form onSubmit={handleSubmit}>
+                    <DialogContent>
                     <FormControl fullWidth margin="normal">
                         <InputLabel>Клиент</InputLabel>
                         <Select
@@ -765,10 +1291,70 @@ function APappointment({ records, clients, setClients, employees, services }) {
                         value={newRecord.notes || ''}
                         onChange={e => setNewRecord({ ...newRecord, notes: e.target.value })}
                     />
+                    {/* Отображение ошибок */}
+                    {appointmentError && (
+                    <Box sx={{ mt: 2, mb: 1, p: 2, bgcolor: 'error.light', borderRadius: 1 }}>
+                        <Typography color="error" variant="subtitle2">
+                            {appointmentError}
+                        </Typography>
+                        
+                        {/* Отображение информации о конфликтующей записи */}
+                        {conflictAppointment && (
+                            <Box sx={{ mt: 1, p: 1, bgcolor: 'background.paper', borderRadius: 1 }}>
+                                <Typography variant="subtitle2">
+                                    Конфликт с записью:
+                                </Typography>
+                                <Typography variant="body2">
+                                    Клиент: {getClientName(conflictAppointment.client_id)}
+                                </Typography>
+                                <Typography variant="body2">
+                                    Услуга: {getServiceName(conflictAppointment.service_id)}
+                                </Typography>
+                                <Typography variant="body2">
+                                    Время: {conflictAppointment.datetime 
+                                        ? format(new Date(conflictAppointment.datetime), 'dd.MM.yyyy HH:mm') 
+                                        : 'Не указано'}
+                                </Typography>
+                            </Box>
+                        )}
+                    </Box>
+                )}
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={handleCloseDialog}>Отмена</Button>
+                <Button type="submit" variant="contained" color="primary">
+                    {editMode ? 'Сохранить' : 'Создать'}
+                </Button>
+            </DialogActions>
+        </form>
+    </Dialog>
+
+                {/* Добавляем компонент Snackbar для уведомлений */}
+                <Snackbar 
+                    open={snackbar.open} 
+                    autoHideDuration={6000} 
+                    onClose={handleCloseSnackbar}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                >
+                    <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+                        {snackbar.message}
+                    </Alert>
+                </Snackbar>
+            
+            {/* Диалог подтверждения удаления */}
+            <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
+                <DialogTitle>Подтверждение удаления</DialogTitle>
+                <DialogContent>
+                    {appointmentToDelete && (
+                        <Typography>
+                            Вы действительно хотите удалить запись клиента {getClientName(appointmentToDelete.client_id)} 
+                            на услугу {getServiceName(appointmentToDelete.service_id)}?
+                        </Typography>
+                    )}
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={handleCloseDialog} color="secondary">Отмена</Button>
-                    <Button onClick={handleAddRecord} color="primary">Добавить</Button>
+                    <Button onClick={() => setOpenDeleteDialog(false)}>Отмена</Button>
+                    <Button onClick={confirmDeleteAppointment} color="error">Удалить</Button>
                 </DialogActions>
             </Dialog>
         </Box>

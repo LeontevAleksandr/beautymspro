@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, request
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 import enum
 from .database import engine
 from .models import Base
@@ -13,7 +13,6 @@ from .models import (
     SpecializationQualificationPivot, ServiceQualificationPivot
 )
 from .database import SessionLocal
-from datetime import datetime, date, time
 from sqlalchemy.exc import IntegrityError
 import os
 import psycopg2
@@ -539,39 +538,235 @@ def appointments(id=None):
                 
         elif request.method == 'POST':
             data = request.json
+            
+            # Проверяем возможность создания записи
+            appointment_datetime = datetime.fromisoformat(data['datetime'].replace('Z', '+00:00'))
+            employee_id = data['employee_id']
+            service_id = data['service_id']
+            
+            # Получаем информацию об услуге для определения продолжительности
+            service = session.query(Service).get(service_id)
+            if not service:
+                return jsonify({'error': 'Услуга не найдена'}), 404
+            
+            # Вычисляем время окончания процедуры
+            appointment_end_time = appointment_datetime + timedelta(minutes=service.duration)
+            
+            # 1. Проверка конфликта с другими записями
+            existing_appointments = session.query(Appointment).filter(
+                Appointment.employee_id == employee_id,
+                Appointment.id != id if id else True
+            ).all()
+            
+            for existing_app in existing_appointments:
+                # Пропускаем отменённые записи
+                if existing_app.status == 'cancelled':
+                    continue
+                
+                # Получаем услугу для определения продолжительности
+                existing_service = session.query(Service).get(existing_app.service_id)
+                if not existing_service:
+                    continue
+                
+                existing_datetime = datetime.fromisoformat(existing_app.datetime.replace('Z', '+00:00') if isinstance(existing_app.datetime, str) else existing_app.datetime.isoformat())
+                existing_end_time = existing_datetime + timedelta(minutes=existing_service.duration)
+                
+                # Проверяем пересечение времени
+                if (
+                    # Новая запись начинается во время существующей
+                    (appointment_datetime >= existing_datetime and appointment_datetime < existing_end_time) or 
+                    # Новая запись заканчивается во время существующей
+                    (appointment_end_time > existing_datetime and appointment_end_time <= existing_end_time) or 
+                    # Новая запись полностью содержит существующую
+                    (appointment_datetime <= existing_datetime and appointment_end_time >= existing_end_time)
+                ):
+                    return jsonify({
+                        'error': 'Временной слот занят другой записью',
+                        'conflict_appointment_id': existing_app.id
+                    }), 409
+            
+            # 2. Проверка графика работы сотрудника
+            appointment_date = appointment_datetime.date()
+            appointment_time = appointment_datetime.time()
+            
+            # Проверяем, есть ли расписание на этот день
+            schedule = session.query(Schedule).filter(
+                Schedule.employee_id == employee_id,
+                Schedule.date == appointment_date
+            ).first()
+                
+            if not schedule:
+                return jsonify({'error': 'Сотрудник не работает в этот день'}), 409
+            
+            # Проверяем, входит ли время начала записи в рабочее время
+            if not (schedule.start_time <= appointment_time <= schedule.end_time):
+                return jsonify({'error': 'Время записи вне рабочего графика сотрудника'}), 409
+            
+            # 3. Проверка исключений в расписании (перерывы, отпуска и т.д.)
+            exceptions = session.query(ScheduleException).join(Schedule).filter(
+                Schedule.employee_id == employee_id,
+                Schedule.date == appointment_date
+            ).all()
+            
+            for exception in exceptions:
+                # Проверяем временное исключение (перерыв)
+                if exception.start_time and exception.end_time:
+                    exception_start = datetime.combine(appointment_date, exception.start_time)
+                    exception_end = datetime.combine(appointment_date, exception.end_time)
+                    
+                    # Проверяем пересечение времени записи с исключением
+                    if (
+                        # Запись начинается во время исключения
+                        (appointment_datetime >= exception_start and appointment_datetime < exception_end) or 
+                        # Запись заканчивается во время исключения
+                        (appointment_end_time > exception_start and appointment_end_time <= exception_end) or 
+                        # Запись полностью содержит исключение
+                        (appointment_datetime <= exception_start and appointment_end_time >= exception_end)
+                    ):
+                        return jsonify({'error': 'Временной слот пересекается с перерывом сотрудника'}), 409
+                
+                # Проверяем временное исключение (перерыв)
+                if exception.start_time and exception.end_time:
+                    exception_start = datetime.combine(appointment_date, exception.start_time)
+                    exception_end = datetime.combine(appointment_date, exception.end_time)
+                    
+                    # Проверяем пересечение времени записи с исключением
+                    if (
+                        # Запись начинается во время исключения
+                        (appointment_datetime >= exception_start and appointment_datetime < exception_end) or 
+                        # Запись заканчивается во время исключения
+                        (appointment_end_time > exception_start and appointment_end_time <= exception_end) or 
+                        # Запись полностью содержит исключение
+                        (appointment_datetime <= exception_start and appointment_end_time >= exception_end)
+                    ):
+                        return jsonify({'error': 'Временной слот пересекается с перерывом сотрудника'}), 409
+            
+            # Если все проверки пройдены успешно, создаем запись
             appointment = Appointment(
-                status=data.get('status', 'created'),
                 client_id=data['client_id'],
+                service_id=data['service_id'],
                 employee_id=data['employee_id'],
-                service_id=data.get('service_id'),
-                complex_id=data.get('complex_id'),
-                datetime=datetime.fromisoformat(data['datetime']),
-                is_completed=data.get('is_completed', False),
+                datetime=data['datetime'],
+                status=data['status'],
                 is_paid=data.get('is_paid', False),
+                is_completed=data.get('is_completed', False),
                 notes=data.get('notes'),
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
+            
             session.add(appointment)
             session.commit()
             return jsonify(serialize(appointment)), 201
-            
+        
         elif request.method == 'PUT':
             appointment = get_or_404(session, Appointment, id)
             if not appointment:
                 return jsonify({'error': 'Not found'}), 404
+            
             data = request.json
-            appointment.status = data.get('status', appointment.status)
+            
+            # Проверяем возможность обновления записи, только если изменяется дата/время или услуга
+            if ('datetime' in data and data['datetime'] != appointment.datetime) or \
+               ('service_id' in data and data['service_id'] != appointment.service_id) or \
+               ('employee_id' in data and data['employee_id'] != appointment.employee_id):
+                
+                appointment_datetime = datetime.fromisoformat(data.get('datetime', appointment.datetime).replace('Z', '+00:00') if isinstance(data.get('datetime', appointment.datetime), str) else data.get('datetime', appointment.datetime).isoformat())
+                employee_id = data.get('employee_id', appointment.employee_id)
+                service_id = data.get('service_id', appointment.service_id)
+                
+                # Получаем информацию об услуге для определения продолжительности
+                service = session.query(Service).get(service_id)
+                if not service:
+                    return jsonify({'error': 'Услуга не найдена'}), 404
+                
+                # Вычисляем время окончания процедуры
+                appointment_end_time = appointment_datetime + timedelta(minutes=service.duration)
+                
+                # 1. Проверка конфликта с другими записями
+                existing_appointments = session.query(Appointment).filter(
+                    Appointment.employee_id == employee_id,
+                    Appointment.id != id
+                ).all()
+                
+                for existing_app in existing_appointments:
+                    # Пропускаем отменённые записи
+                    if existing_app.status == 'cancelled':
+                        continue
+                    
+                    # Получаем услугу для определения продолжительности
+                    existing_service = session.query(Service).get(existing_app.service_id)
+                    if not existing_service:
+                        continue
+                    
+                    existing_datetime = datetime.fromisoformat(existing_app.datetime.replace('Z', '+00:00') if isinstance(existing_app.datetime, str) else existing_app.datetime.isoformat())
+                    existing_end_time = existing_datetime + timedelta(minutes=existing_service.duration)
+                    
+                    # Проверяем пересечение времени
+                    if (
+                        # Новая запись начинается во время существующей
+                        (appointment_datetime >= existing_datetime and appointment_datetime < existing_end_time) or 
+                        # Новая запись заканчивается во время существующей
+                        (appointment_end_time > existing_datetime and appointment_end_time <= existing_end_time) or 
+                        # Новая запись полностью содержит существующую
+                        (appointment_datetime <= existing_datetime and appointment_end_time >= existing_end_time)
+                    ):
+                        return jsonify({
+                            'error': 'Временной слот занят другой записью',
+                            'conflict_appointment_id': existing_app.id
+                        }), 409
+                
+                # 2. Проверка графика работы сотрудника
+                appointment_date = appointment_datetime.date()
+                appointment_time = appointment_datetime.time()
+                
+                # Проверяем, есть ли расписание на этот день
+                schedule = session.query(Schedule).filter(
+                    Schedule.employee_id == employee_id,
+                    Schedule.date == appointment_date
+                ).first()
+                
+                if not schedule:
+                    return jsonify({'error': 'Сотрудник не работает в этот день недели'}), 409
+                
+                # Проверяем, входит ли время начала записи в рабочее время
+                if not (schedule.start_time <= appointment_time <= schedule.end_time):
+                    return jsonify({'error': 'Время записи вне рабочего графика сотрудника'}), 409
+                
+                # 3. Проверка исключений в расписании (перерывы, отпуска и т.д.)
+                exceptions = session.query(ScheduleException).join(Schedule).filter(
+                    Schedule.employee_id == employee_id,
+                    Schedule.date == appointment_date
+                ).all()
+                
+                for exception in exceptions:
+                    # Проверяем временное исключение (перерыв)
+                    if exception.start_time and exception.end_time:
+                        exception_start = datetime.combine(appointment_date, exception.start_time)
+                        exception_end = datetime.combine(appointment_date, exception.end_time)
+                        
+                        # Проверяем пересечение времени записи с исключением
+                        if (
+                            # Запись начинается во время исключения
+                            (appointment_datetime >= exception_start and appointment_datetime < exception_end) or 
+                            # Запись заканчивается во время исключения
+                            (appointment_end_time > exception_start and appointment_end_time <= exception_end) or 
+                            # Запись полностью содержит исключение
+                            (appointment_datetime <= exception_start and appointment_end_time >= exception_end)
+                        ):
+                            return jsonify({'error': 'Временной слот пересекается с перерывом сотрудника'}), 409
+            
+            # Если все проверки пройдены успешно или они не требовались, обновляем запись
             appointment.client_id = data.get('client_id', appointment.client_id)
-            appointment.employee_id = data.get('employee_id', appointment.employee_id)
             appointment.service_id = data.get('service_id', appointment.service_id)
-            appointment.complex_id = data.get('complex_id', appointment.complex_id)
-            if 'datetime' in data:
-                appointment.datetime = datetime.fromisoformat(data['datetime'])
-            appointment.is_completed = data.get('is_completed', appointment.is_completed)
+            appointment.employee_id = data.get('employee_id', appointment.employee_id)
+            appointment.datetime = data.get('datetime', appointment.datetime)
+            appointment.status = data.get('status', appointment.status)
             appointment.is_paid = data.get('is_paid', appointment.is_paid)
+            appointment.is_completed = data.get('is_completed', appointment.is_completed)
             appointment.notes = data.get('notes', appointment.notes)
             appointment.updated_at = datetime.now()
+            
             session.commit()
             return jsonify(serialize(appointment))
             
@@ -1017,7 +1212,7 @@ def schedule_appointment(schedule_id=None, appointment_id=None):
         if request.method == 'GET':
             pivots = session.query(ScheduleAppointment).all()
             return jsonify([{'schedule_id': p.schedule_id, 'appointment_id': p.appointment_id} for p in pivots])
-                
+                    
         elif request.method == 'POST':
             data = request.json
             pivot = ScheduleAppointment(
