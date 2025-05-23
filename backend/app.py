@@ -20,6 +20,11 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import logging
 from flask_cors import CORS
 
+from sqlalchemy import func, extract, case, and_, or_, desc, distinct, text
+from sqlalchemy.sql import label
+
+from .app_analytics import register_analytics_routes
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -72,6 +77,17 @@ def create_database_if_not_exists():
 
 app = Flask(__name__)
 CORS(app)
+
+register_analytics_routes(
+    app, 
+    SessionLocal, 
+    Service, 
+    ServicePopularity, 
+    Employee, 
+    Schedule, 
+    EmployeeWorkload, 
+    Appointment
+)
 
 # Вспомогательные функции
 import enum
@@ -539,42 +555,113 @@ def appointments(id=None):
         elif request.method == 'POST':
             data = request.json
             
-            # Проверяем возможность создания записи
-            appointment_datetime = datetime.fromisoformat(data['datetime'].replace('Z', '+00:00'))
+            # Получаем данные из запроса
+            client_id = data['client_id']
             employee_id = data['employee_id']
-            service_id = data['service_id']
+            service_id = data.get('service_id')
+            complex_id = data.get('complex_id')
+            appointment_datetime = datetime.fromisoformat(data['datetime'])
+            status = data.get('status', 'scheduled')
+            custom_duration = data.get('custom_duration')  # Пользовательская продолжительность
+            final_price = data.get('final_price')  # Итоговая цена
+            
+            # Проверяем, что указана хотя бы одна услуга или комплекс
+            if not service_id and not complex_id:
+                return jsonify({'error': 'Необходимо указать услугу или комплекс услуг'}), 400
             
             # Получаем информацию об услуге для определения продолжительности
-            service = session.query(Service).get(service_id)
-            if not service:
-                return jsonify({'error': 'Услуга не найдена'}), 404
+            total_duration = 0
+            
+            if service_id:
+                service = session.query(Service).get(service_id)
+                if not service:
+                    return jsonify({'error': 'Услуга не найдена'}), 404
+                
+                # Используем пользовательскую продолжительность, если она указана
+                if custom_duration is not None:
+                    total_duration = custom_duration
+                else:
+                    total_duration = service.duration
+            
+            if complex_id:
+                complex = session.query(ServiceComplex).get(complex_id)
+                if not complex:
+                    return jsonify({'error': 'Комплекс услуг не найден'}), 404
+                
+                # Получаем все услуги в комплексе
+                complex_services = session.query(Service).join(
+                    ServiceComplexPivot, 
+                    Service.id == ServiceComplexPivot.service_id
+                ).filter(
+                    ServiceComplexPivot.complex_id == complex_id
+                ).all()
+                
+                # Суммируем продолжительность всех услуг в комплексе
+                # Если указана пользовательская продолжительность, используем её вместо суммы
+                if custom_duration is not None:
+                    total_duration = custom_duration
+                else:
+                    for s in complex_services:
+                        total_duration += s.duration
             
             # Вычисляем время окончания процедуры
-            appointment_end_time = appointment_datetime + timedelta(minutes=service.duration)
+            appointment_end_time = appointment_datetime + timedelta(minutes=total_duration)
             
-            # 1. Проверка конфликта с другими записями
+            # Проверяем, что время записи попадает в рабочее время сотрудника
+            schedule = session.query(Schedule).filter(
+                Schedule.employee_id == employee_id,
+                Schedule.date == appointment_datetime.date()
+            ).first()
+            
+            if not schedule:
+                return jsonify({'error': 'Нет расписания для сотрудника на эту дату'}), 400
+            
+            # Проверяем, что время записи попадает в рабочее время
+            schedule_start = datetime.combine(schedule.date, schedule.start_time)
+            schedule_end = datetime.combine(schedule.date, schedule.end_time)
+            
+            if appointment_datetime < schedule_start or appointment_end_time > schedule_end:
+                return jsonify({'error': 'Время записи выходит за рамки рабочего времени сотрудника'}), 400
+            
+            # Проверяем, что нет пересечений с другими записями
             existing_appointments = session.query(Appointment).filter(
                 Appointment.employee_id == employee_id,
-                Appointment.id != id if id else True
+                Appointment.datetime >= schedule_start,
+                Appointment.datetime <= schedule_end,
+                Appointment.status != 'cancelled'
             ).all()
             
             for existing_app in existing_appointments:
-                # Пропускаем отменённые записи
-                if existing_app.status == 'cancelled':
-                    continue
+                # Получаем продолжительность существующей записи
+                existing_duration = 0
                 
-                # Получаем услугу для определения продолжительности
-                existing_service = session.query(Service).get(existing_app.service_id)
-                if not existing_service:
-                    continue
+                # Используем пользовательскую продолжительность из самой записи
+                if existing_app.custom_duration:
+                    existing_duration = existing_app.custom_duration
+                else:
+                    # Получаем услуги для существующей записи
+                    existing_services = session.query(Service).join(
+                        AppointmentServicePivot,
+                        Service.id == AppointmentServicePivot.service_id
+                    ).filter(
+                        AppointmentServicePivot.appointment_id == existing_app.id
+                    ).all()
+                    
+                    # Суммируем продолжительность всех услуг
+                    for s in existing_services:
+                        existing_duration += s.duration
                 
-                existing_datetime = datetime.fromisoformat(existing_app.datetime.replace('Z', '+00:00') if isinstance(existing_app.datetime, str) else existing_app.datetime.isoformat())
-                existing_end_time = existing_datetime + timedelta(minutes=existing_service.duration)
+                # Если продолжительность не определена, используем стандартное значение
+                if existing_duration == 0:
+                    existing_duration = 60  # Стандартная продолжительность 1 час
+                
+                existing_datetime = existing_app.datetime
+                existing_end_time = existing_datetime + timedelta(minutes=existing_duration)
                 
                 # Проверяем пересечение времени
                 if (
                     # Новая запись начинается во время существующей
-                    (appointment_datetime >= existing_datetime and appointment_datetime < existing_end_time) or 
+                    (appointment_datetime >= existing_datetime and appointment_datetime < existing_end_time) or
                     # Новая запись заканчивается во время существующей
                     (appointment_end_time > existing_datetime and appointment_end_time <= existing_end_time) or 
                     # Новая запись полностью содержит существующую
@@ -585,77 +672,48 @@ def appointments(id=None):
                         'conflict_appointment_id': existing_app.id
                     }), 409
             
-            # 2. Проверка графика работы сотрудника
-            appointment_date = appointment_datetime.date()
-            appointment_time = appointment_datetime.time()
-            
-            # Проверяем, есть ли расписание на этот день
-            schedule = session.query(Schedule).filter(
-                Schedule.employee_id == employee_id,
-                Schedule.date == appointment_date
-            ).first()
-                
-            if not schedule:
-                return jsonify({'error': 'Сотрудник не работает в этот день'}), 409
-            
-            # Проверяем, входит ли время начала записи в рабочее время
-            if not (schedule.start_time <= appointment_time <= schedule.end_time):
-                return jsonify({'error': 'Время записи вне рабочего графика сотрудника'}), 409
-            
-            # 3. Проверка исключений в расписании (перерывы, отпуска и т.д.)
-            exceptions = session.query(ScheduleException).join(Schedule).filter(
-                Schedule.employee_id == employee_id,
-                Schedule.date == appointment_date
-            ).all()
-            
-            for exception in exceptions:
-                # Проверяем временное исключение (перерыв)
-                if exception.start_time and exception.end_time:
-                    exception_start = datetime.combine(appointment_date, exception.start_time)
-                    exception_end = datetime.combine(appointment_date, exception.end_time)
-                    
-                    # Проверяем пересечение времени записи с исключением
-                    if (
-                        # Запись начинается во время исключения
-                        (appointment_datetime >= exception_start and appointment_datetime < exception_end) or 
-                        # Запись заканчивается во время исключения
-                        (appointment_end_time > exception_start and appointment_end_time <= exception_end) or 
-                        # Запись полностью содержит исключение
-                        (appointment_datetime <= exception_start and appointment_end_time >= exception_end)
-                    ):
-                        return jsonify({'error': 'Временной слот пересекается с перерывом сотрудника'}), 409
-                
-                # Проверяем временное исключение (перерыв)
-                if exception.start_time and exception.end_time:
-                    exception_start = datetime.combine(appointment_date, exception.start_time)
-                    exception_end = datetime.combine(appointment_date, exception.end_time)
-                    
-                    # Проверяем пересечение времени записи с исключением
-                    if (
-                        # Запись начинается во время исключения
-                        (appointment_datetime >= exception_start and appointment_datetime < exception_end) or 
-                        # Запись заканчивается во время исключения
-                        (appointment_end_time > exception_start and appointment_end_time <= exception_end) or 
-                        # Запись полностью содержит исключение
-                        (appointment_datetime <= exception_start and appointment_end_time >= exception_end)
-                    ):
-                        return jsonify({'error': 'Временной слот пересекается с перерывом сотрудника'}), 409
-            
-            # Если все проверки пройдены успешно, создаем запись
+            # Создаем запись
             appointment = Appointment(
-                client_id=data['client_id'],
-                service_id=data['service_id'],
-                employee_id=data['employee_id'],
-                datetime=data['datetime'],
-                status=data['status'],
-                is_paid=data.get('is_paid', False),
-                is_completed=data.get('is_completed', False),
-                notes=data.get('notes'),
+                client_id=client_id,
+                employee_id=employee_id,
+                datetime=appointment_datetime,
+                status=status,
+                service_id=service_id,
+                complex_id=complex_id,
+                custom_duration=custom_duration,  # Сохраняем в саму запись
+                final_price=final_price,  # Сохраняем итоговую цену
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
             
             session.add(appointment)
+            session.flush()  # Получаем ID созданной записи
+            
+            # Добавляем связь с услугой, если она указана
+            if service_id:
+                service_pivot = AppointmentServicePivot(
+                    appointment_id=appointment.id,
+                    service_id=service_id
+                    # Убираем custom_duration отсюда, так как оно теперь в самой записи
+                )
+                session.add(service_pivot)
+            
+            # Добавляем связь с комплексом, если он указан
+            if complex_id:
+                complex_pivot = AppointmentComplexPivot(
+                    appointment_id=appointment.id,
+                    complex_id=complex_id
+                )
+                session.add(complex_pivot)
+                
+                # Также добавляем связи со всеми услугами в комплексе
+                for s in complex_services:
+                    service_pivot = AppointmentServicePivot(
+                        appointment_id=appointment.id,
+                        service_id=s.id
+                    )
+                    session.add(service_pivot)
+            
             session.commit()
             return jsonify(serialize(appointment)), 201
         
@@ -665,23 +723,52 @@ def appointments(id=None):
                 return jsonify({'error': 'Not found'}), 404
             
             data = request.json
+            custom_duration = data.get('custom_duration')  # Получаем пользовательскую продолжительность
             
-            # Проверяем возможность обновления записи, только если изменяется дата/время или услуга
+            # Проверяем возможность обновления записи, только если изменяется дата/время, услуга или сотрудник
             if ('datetime' in data and data['datetime'] != appointment.datetime) or \
                ('service_id' in data and data['service_id'] != appointment.service_id) or \
-               ('employee_id' in data and data['employee_id'] != appointment.employee_id):
+               ('employee_id' in data and data['employee_id'] != appointment.employee_id) or \
+               ('custom_duration' in data):  # Также проверяем, если изменилась продолжительность
                 
                 appointment_datetime = datetime.fromisoformat(data.get('datetime', appointment.datetime).replace('Z', '+00:00') if isinstance(data.get('datetime', appointment.datetime), str) else data.get('datetime', appointment.datetime).isoformat())
                 employee_id = data.get('employee_id', appointment.employee_id)
-                service_id = data.get('service_id', appointment.service_id)
+                service_id = data.get('service_id')
                 
-                # Получаем информацию об услуге для определения продолжительности
-                service = session.query(Service).get(service_id)
-                if not service:
-                    return jsonify({'error': 'Услуга не найдена'}), 404
+                # Получаем информацию об услуге и продолжительности
+                total_duration = 0
+                
+                # Если указана пользовательская продолжительность, используем её
+                if custom_duration is not None:
+                    total_duration = custom_duration
+                elif service_id:
+                    # Если указан новый service_id, получаем его продолжительность
+                    service = session.query(Service).get(service_id)
+                    if not service:
+                        return jsonify({'error': 'Услуга не найдена'}), 404
+                    total_duration = service.duration
+                elif appointment.custom_duration:
+                    # Используем существующую пользовательскую продолжительность из записи
+                    total_duration = appointment.custom_duration
+                else:
+                    # Получаем продолжительность из текущей услуги
+                    existing_services = session.query(Service).join(
+                        AppointmentServicePivot,
+                        Service.id == AppointmentServicePivot.service_id
+                    ).filter(
+                        AppointmentServicePivot.appointment_id == appointment.id
+                    ).all()
+                    
+                    # Суммируем продолжительность всех услуг
+                    for s in existing_services:
+                        total_duration += s.duration
+                
+                # Если продолжительность не определена, используем стандартное значение
+                if total_duration == 0:
+                    total_duration = 60  # Стандартная продолжительность 1 час
                 
                 # Вычисляем время окончания процедуры
-                appointment_end_time = appointment_datetime + timedelta(minutes=service.duration)
+                appointment_end_time = appointment_datetime + timedelta(minutes=total_duration)
                 
                 # 1. Проверка конфликта с другими записями
                 existing_appointments = session.query(Appointment).filter(
@@ -694,13 +781,31 @@ def appointments(id=None):
                     if existing_app.status == 'cancelled':
                         continue
                     
-                    # Получаем услугу для определения продолжительности
-                    existing_service = session.query(Service).get(existing_app.service_id)
-                    if not existing_service:
-                        continue
+                    # Получаем продолжительность существующей записи
+                    existing_duration = 0
                     
-                    existing_datetime = datetime.fromisoformat(existing_app.datetime.replace('Z', '+00:00') if isinstance(existing_app.datetime, str) else existing_app.datetime.isoformat())
-                    existing_end_time = existing_datetime + timedelta(minutes=existing_service.duration)
+                    # Используем пользовательскую продолжительность из самой записи
+                    if existing_app.custom_duration:
+                        existing_duration = existing_app.custom_duration
+                    else:
+                        # Получаем услуги для существующей записи
+                        existing_services = session.query(Service).join(
+                            AppointmentServicePivot,
+                            Service.id == AppointmentServicePivot.service_id
+                        ).filter(
+                            AppointmentServicePivot.appointment_id == existing_app.id
+                        ).all()
+                        
+                        # Суммируем продолжительность всех услуг
+                        for s in existing_services:
+                            existing_duration += s.duration
+                    
+                    # Если продолжительность не определена, используем стандартное значение
+                    if existing_duration == 0:
+                        existing_duration = 60  # Стандартная продолжительность 1 час
+                    
+                    existing_datetime = existing_app.datetime
+                    existing_end_time = existing_datetime + timedelta(minutes=existing_duration)
                     
                     # Проверяем пересечение времени
                     if (
@@ -729,9 +834,12 @@ def appointments(id=None):
                 if not schedule:
                     return jsonify({'error': 'Сотрудник не работает в этот день недели'}), 409
                 
-                # Проверяем, входит ли время начала записи в рабочее время
-                if not (schedule.start_time <= appointment_time <= schedule.end_time):
-                    return jsonify({'error': 'Время записи вне рабочего графика сотрудника'}), 409
+                # Проверяем, входит ли время начала и окончания записи в рабочее время
+                schedule_start = datetime.combine(appointment_date, schedule.start_time)
+                schedule_end = datetime.combine(appointment_date, schedule.end_time)
+                
+                if appointment_datetime < schedule_start or appointment_end_time > schedule_end:
+                    return jsonify({'error': 'Время записи выходит за рамки рабочего времени сотрудника'}), 409
                 
                 # 3. Проверка исключений в расписании (перерывы, отпуска и т.д.)
                 exceptions = session.query(ScheduleException).join(Schedule).filter(
@@ -758,14 +866,38 @@ def appointments(id=None):
             
             # Если все проверки пройдены успешно или они не требовались, обновляем запись
             appointment.client_id = data.get('client_id', appointment.client_id)
-            appointment.service_id = data.get('service_id', appointment.service_id)
             appointment.employee_id = data.get('employee_id', appointment.employee_id)
             appointment.datetime = data.get('datetime', appointment.datetime)
             appointment.status = data.get('status', appointment.status)
+            appointment.service_id = data.get('service_id', appointment.service_id)
+            appointment.complex_id = data.get('complex_id', appointment.complex_id)
+            appointment.custom_duration = data.get('custom_duration', appointment.custom_duration)
             appointment.is_paid = data.get('is_paid', appointment.is_paid)
             appointment.is_completed = data.get('is_completed', appointment.is_completed)
             appointment.notes = data.get('notes', appointment.notes)
+            appointment.final_price = data.get('final_price', appointment.final_price)
             appointment.updated_at = datetime.now()
+            
+            # Обновляем связь с услугой, если она указана
+            if 'service_id' in data:
+                service_id = data.get('service_id')
+                
+                # Получаем текущую связь с услугой
+                service_pivot = session.query(AppointmentServicePivot).filter_by(
+                    appointment_id=appointment.id
+                ).first()
+                
+                if service_pivot and service_id:
+                    # Обновляем существующую связь
+                    service_pivot.service_id = service_id
+                elif service_id:
+                    # Создаем новую связь
+                    new_pivot = AppointmentServicePivot(
+                        appointment_id=appointment.id,
+                        service_id=service_id
+                        # Убираем custom_duration, так как оно теперь в самой записи
+                    )
+                    session.add(new_pivot)
             
             session.commit()
             return jsonify(serialize(appointment))
@@ -1055,9 +1187,17 @@ def employee_workload(schedule_id=None):
                 
         elif request.method == 'POST':
             data = request.json
+            booked_slots = data['booked_slots']
+            total_slots = data['total_slots']
+            
+            # Расчет процента загруженности
+            workload_percent = round((booked_slots / total_slots) * 100, 2) if total_slots > 0 else 0
+            
             workload = EmployeeWorkload(
                 schedule_id=data['schedule_id'],
-                booked_slots=data['booked_slots']
+                booked_slots=booked_slots,
+                total_slots=total_slots,
+                workload_percent=workload_percent
             )
             session.add(workload)
             session.commit()
@@ -1070,7 +1210,13 @@ def employee_workload(schedule_id=None):
             data = request.json
             workload.schedule_id = data.get('schedule_id', workload.schedule_id)
             workload.booked_slots = data.get('booked_slots', workload.booked_slots)
+            workload.total_slots = data.get('total_slots', workload.total_slots)
+            
+            # Пересчет процента загруженности при обновлении
+            workload.workload_percent = round((workload.booked_slots / workload.total_slots) * 100, 2) if workload.total_slots > 0 else 0
+            
             session.commit()
+
             return jsonify(serialize(workload))
             
         elif request.method == 'DELETE':
@@ -1247,30 +1393,48 @@ def schedule_appointment(schedule_id=None, appointment_id=None):
 
 # AppointmentServicePivot
 @app.route('/api/appointment_service_pivot', methods=['GET', 'POST'])
-@app.route('/api/appointment_service_pivot/<int:service_id>/<int:appointment_id>', methods=['DELETE'])
+@app.route('/api/appointment_service_pivot/<int:service_id>/<int:appointment_id>', methods=['GET', 'PUT', 'DELETE'])
 def appointment_service_pivot(service_id=None, appointment_id=None):
     session = SessionLocal()
     try:
         if request.method == 'GET':
-            pivots = session.query(AppointmentServicePivot).all()
-            return jsonify([{'service_id': p.service_id, 'appointment_id': p.appointment_id} for p in pivots])
+            if service_id and appointment_id:
+                pivot = session.query(AppointmentServicePivot).filter_by(
+                    service_id=service_id, appointment_id=appointment_id
+                ).first()
+                if not pivot:
+                    return jsonify({'error': 'Not found'}), 404
+                return jsonify(serialize(pivot))
+            else:
+                pivots = session.query(AppointmentServicePivot).all()
+                return jsonify([serialize(p) for p in pivots])
                 
         elif request.method == 'POST':
             data = request.json
             pivot = AppointmentServicePivot(
                 service_id=data['service_id'],
-                appointment_id=data['appointment_id']
+                appointment_id=data['appointment_id'],
+                custom_duration=data.get('custom_duration')  # Опциональный параметр
             )
             session.add(pivot)
             session.commit()
-            return jsonify({'service_id': pivot.service_id, 'appointment_id': pivot.appointment_id}), 201
+            return jsonify(serialize(pivot)), 201
+            
+        elif request.method == 'PUT':
+            pivot = session.query(AppointmentServicePivot).filter_by(
+                service_id=service_id, appointment_id=appointment_id
+            ).first()
+            if not pivot:
+                return jsonify({'error': 'Not found'}), 404
+            data = request.json
+            if 'custom_duration' in data:
+                pivot.custom_duration = data['custom_duration']
+            session.commit()
+            return jsonify(serialize(pivot))
             
         elif request.method == 'DELETE':
-            if not service_id or not appointment_id:
-                return jsonify({'error': 'service_id and appointment_id are required'}), 400
             pivot = session.query(AppointmentServicePivot).filter_by(
-                service_id=service_id,
-                appointment_id=appointment_id
+                service_id=service_id, appointment_id=appointment_id
             ).first()
             if not pivot:
                 return jsonify({'error': 'Not found'}), 404
@@ -1509,6 +1673,189 @@ def get_specialization_qualifications(specialization_id):
             result.append(item)
             
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+@app.route('/api/available_slots', methods=['GET'])
+def available_slots():
+    """
+    Получение доступных временных слотов для записи к определенному сотруднику на определенную дату
+    Параметры запроса:
+    - employee_id: ID сотрудника
+    - date: дата (YYYY-MM-DD)
+    - service_id: ID услуги (опционально)
+    - complex_id: ID комплекса услуг (опционально)
+    - duration: продолжительность в минутах (опционально, если указаны service_id или complex_id)
+    - slot_interval: интервал слотов в минутах (по умолчанию 30)
+    """
+    session = SessionLocal()
+    try:
+        # Получаем параметры запроса
+        employee_id = request.args.get('employee_id')
+        date_str = request.args.get('date')
+        service_id = request.args.get('service_id')
+        complex_id = request.args.get('complex_id')
+        custom_duration = request.args.get('duration')
+        slot_interval = int(request.args.get('slot_interval', 30))
+        
+        if not all([employee_id, date_str]):
+            return jsonify({'error': 'Необходимо указать ID сотрудника и дату'}), 400
+        
+        # Преобразуем строку в объект date
+        requested_date = date.fromisoformat(date_str)
+        
+        # Получаем расписание сотрудника на указанную дату
+        schedule = session.query(Schedule).filter(
+            Schedule.employee_id == employee_id,
+            Schedule.date == requested_date
+        ).first()
+        
+        if not schedule:
+            return jsonify({'error': 'Нет расписания для сотрудника на эту дату'}), 404
+        
+        # Определяем начало и конец рабочего дня
+        schedule_start = datetime.combine(schedule.date, schedule.start_time)
+        schedule_end = datetime.combine(schedule.date, schedule.end_time)
+        
+        # Получаем продолжительность услуги
+        total_duration = 0
+        
+        if custom_duration:
+            total_duration = int(custom_duration)
+        elif service_id:
+            service = session.query(Service).get(service_id)
+            if not service:
+                return jsonify({'error': 'Услуга не найдена'}), 404
+            total_duration = service.duration
+        elif complex_id:
+            complex = session.query(ServiceComplex).get(complex_id)
+            if not complex:
+                return jsonify({'error': 'Комплекс услуг не найден'}), 404
+            
+            # Получаем все услуги в комплексе
+            complex_services = session.query(Service).join(
+                ServiceComplexPivot, 
+                Service.id == ServiceComplexPivot.service_id
+            ).filter(
+                ServiceComplexPivot.complex_id == complex_id
+            ).all()
+            
+            # Суммируем продолжительность всех услуг в комплексе
+            for s in complex_services:
+                total_duration += s.duration
+        
+        # Если продолжительность не определена, используем стандартное значение
+        if total_duration == 0:
+            total_duration = 60  # Стандартная продолжительность 1 час
+        
+        # Получаем существующие записи на этот день
+        existing_appointments = session.query(Appointment).filter(
+            Appointment.employee_id == employee_id,
+            Appointment.datetime >= schedule_start,
+            Appointment.datetime <= schedule_end,
+            Appointment.status != 'cancelled'
+        ).all()
+        
+        # Создаем список занятых временных интервалов
+        busy_slots = []
+        
+        for appointment in existing_appointments:
+            # Получаем продолжительность существующей записи
+            existing_duration = 0
+            
+            # Используем пользовательскую продолжительность из самой записи
+            if appointment.custom_duration:
+                existing_duration = appointment.custom_duration
+            else:
+                # Получаем услуги для существующей записи
+                existing_services = session.query(Service).join(
+                    AppointmentServicePivot,
+                    Service.id == AppointmentServicePivot.service_id
+                ).filter(
+                    AppointmentServicePivot.appointment_id == appointment.id
+                ).all()
+                
+                # Суммируем продолжительность всех услуг
+                for s in existing_services:
+                    existing_duration += s.duration
+            
+            # Если продолжительность не определена, используем стандартное значение
+            if existing_duration == 0:
+                existing_duration = 60
+            
+            start_time = appointment.datetime
+            end_time = start_time + timedelta(minutes=existing_duration)
+            
+            busy_slots.append({
+                'start': start_time,
+                'end': end_time
+            })
+        
+        # Получаем перерывы (исключения) в расписании
+        exceptions = session.query(ScheduleException).filter(
+            ScheduleException.schedule_id == schedule.id
+        ).all()
+        
+        for exception in exceptions:
+            if exception.start_time and exception.end_time:
+                exception_start = datetime.combine(schedule.date, exception.start_time)
+                exception_end = datetime.combine(schedule.date, exception.end_time)
+                
+                busy_slots.append({
+                    'start': exception_start,
+                    'end': exception_end
+                })
+        
+        # Генерируем все возможные временные слоты с заданным интервалом
+        all_slots = []
+        current_time = schedule_start
+        
+        while current_time + timedelta(minutes=total_duration) <= schedule_end:
+            all_slots.append({
+                'start': current_time,
+                'end': current_time + timedelta(minutes=total_duration)
+            })
+            current_time += timedelta(minutes=slot_interval)
+        
+        # Фильтруем доступные слоты (не пересекающиеся с занятыми)
+        available_slots = []
+        
+        for slot in all_slots:
+            is_available = True
+            
+            for busy_slot in busy_slots:
+                # Проверяем пересечение временных интервалов
+                if (
+                    # Слот начинается во время занятого
+                    (slot['start'] >= busy_slot['start'] and slot['start'] < busy_slot['end']) or
+                    # Слот заканчивается во время занятого
+                    (slot['end'] > busy_slot['start'] and slot['end'] <= busy_slot['end']) or 
+                    # Слот полностью содержит занятый
+                    (slot['start'] <= busy_slot['start'] and slot['end'] >= busy_slot['end'])
+                ):
+                    is_available = False
+                    break
+            
+            if is_available:
+                available_slots.append({
+                    'start': slot['start'].strftime('%H:%M'),
+                    'end': slot['end'].strftime('%H:%M'),
+                    'duration': total_duration
+                })
+        
+        return jsonify({
+            'employee_id': int(employee_id),
+            'date': date_str,
+            'working_hours': {
+                'start': schedule.start_time.strftime('%H:%M'),
+                'end': schedule.end_time.strftime('%H:%M')
+            },
+            'service_duration': total_duration,
+            'available_slots': available_slots
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 400
     finally:

@@ -4,9 +4,10 @@ import {
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
     Dialog, DialogActions, DialogContent, DialogTitle,
     FormControl, InputLabel, Select, MenuItem, IconButton,
-    Snackbar, Alert, FormHelperText, Checkbox, FormControlLabel
+    Snackbar, Alert, FormHelperText, Checkbox, FormControlLabel,
+    Stack, Divider
 } from '@mui/material';
-import { Edit, Delete, Add } from '@mui/icons-material';
+import { Edit, Delete, Add, Person, Badge, Phone, Email } from '@mui/icons-material';
 
 function APemployee() {
     // Состояния для сотрудников
@@ -45,12 +46,22 @@ function APemployee() {
         severity: 'success'
     });
 
+    // Состояние для группированных сотрудников
+    const [groupedEmployees, setGroupedEmployees] = useState({});
+
     // Загрузка данных при монтировании компонента
     useEffect(() => {
         fetchEmployees();
         fetchSpecializations();
         fetchQualifications();
     }, []);
+
+    // Группировка сотрудников при изменении данных
+    useEffect(() => {
+        if (employees.length > 0) {
+            groupEmployeesBySpecialization();
+        }
+    }, [employees]);
 
     // Функции для работы с сотрудниками
     const fetchEmployees = async () => {
@@ -66,6 +77,37 @@ function APemployee() {
         } catch (error) {
             showSnackbar(`Ошибка сети при загрузке сотрудников: ${error.message}`, 'error');
         }
+    };
+
+    // Группировка сотрудников по специализациям
+    const groupEmployeesBySpecialization = () => {
+        const grouped = {};
+        
+        employees.forEach(employee => {
+            const specializationName = employee.specialization ? employee.specialization.name : 'Без специализации';
+            const specializationId = employee.specialization ? employee.specialization.id : 'no_spec';
+            
+            if (!grouped[specializationName]) {
+                grouped[specializationName] = {
+                    id: specializationId,
+                    name: specializationName,
+                    employees: []
+                };
+            }
+            
+            grouped[specializationName].employees.push(employee);
+        });
+        
+        // Сортируем сотрудников внутри каждой группы по приоритету квалификации (по возрастанию)
+        Object.keys(grouped).forEach(specName => {
+            grouped[specName].employees.sort((a, b) => {
+                const priorityA = a.qualification ? a.qualification.priority : 999;
+                const priorityB = b.qualification ? b.qualification.priority : 999;
+                return priorityA - priorityB;
+            });
+        });
+        
+        setGroupedEmployees(grouped);
     };
 
     const fetchSpecializations = async () => {
@@ -238,7 +280,7 @@ function APemployee() {
                     method: 'DELETE'
                 });
                 if (response.ok) {
-                    fetchEmployees();
+                    fetchEmployees(); // Это автоматически вызовет группировку через useEffect
                     showSnackbar('Сотрудник успешно удален', 'success');
                 } else {
                     const errorData = await response.json();
@@ -277,7 +319,7 @@ function APemployee() {
             });
             
             if (response.ok) {
-                fetchEmployees();
+                fetchEmployees(); // Это автоматически вызовет группировку через useEffect
                 setOpenEmployeeDialog(false);
                 showSnackbar(
                     selectedEmployee ? 'Сотрудник успешно обновлен' : 'Сотрудник успешно добавлен', 
@@ -320,235 +362,684 @@ function APemployee() {
     };
 
     return (
-        <Box sx={{ p: 2 }}>
-            <Typography variant="h5" align="center" gutterBottom>
-                Управление сотрудниками
-            </Typography>
-
-            <Box>
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-                    <Button 
-                        variant="contained" 
-                        startIcon={<Add />} 
-                        onClick={handleAddEmployee}
-                        sx={{ borderRadius: '4px', textTransform: 'none' }}
+        <Box sx={{ 
+            p: 3, 
+            backgroundColor: '#fafafa',
+            minHeight: '100vh'
+        }}>
+            {/* ============ ЗАГОЛОВОК И КНОПКА ДОБАВЛЕНИЯ ============ */}
+            <Stack 
+                direction={{ xs: 'column', sm: 'row' }} 
+                justifyContent="space-between" 
+                alignItems={{ xs: 'stretch', sm: 'center' }}
+                spacing={2}
+                sx={{ mb: 3 }}
+            >
+                <Box>
+                    <Typography 
+                        variant="h5" 
+                        sx={{ 
+                            fontWeight: 500,
+                            color: '#1a1a1a',
+                            mb: 0.5
+                        }}
                     >
-                        Добавить сотрудника
-                    </Button>
+                        Управление сотрудниками
+                    </Typography>
+                    <Typography 
+                        variant="body2" 
+                        sx={{ color: '#666' }}
+                    >
+                        Добавление и редактирование сотрудников салона
+                        {employees.length > 0 && (
+                            <Box component="span" sx={{ ml: 2 }}>
+                                • Всего сотрудников: {employees.length} 
+                                • Специализаций: {Object.keys(groupedEmployees).length}
+                            </Box>
+                        )}
+                    </Typography>
                 </Box>
+                
+                <Button 
+                    variant="contained" 
+                    startIcon={<Add />} 
+                    onClick={handleAddEmployee}
+                    size="medium"
+                    sx={{ 
+                        borderRadius: 2, 
+                        textTransform: 'none',
+                        backgroundColor: '#1976d2',
+                        boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)',
+                        minWidth: 160,
+                        '&:hover': {
+                            backgroundColor: '#1565c0',
+                            boxShadow: '0 4px 12px rgba(25, 118, 210, 0.35)'
+                        }
+                    }}
+                >
+                    Добавить сотрудника
+                </Button>
+            </Stack>
 
-                <TableContainer component={Paper} sx={{ boxShadow: '0 2px 4px rgba(0,0,0,0.1)', borderRadius: '8px' }}>
-                    <Table>
-                        <TableHead sx={{ backgroundColor: '#f5f5f5' }}>
+            {/* ============ ТАБЛИЦА СОТРУДНИКОВ С ГРУППИРОВКОЙ ============ */}
+            <TableContainer 
+                component={Paper} 
+                sx={{ 
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.08)', 
+                    borderRadius: 3,
+                    border: '1px solid #e0e0e0',
+                    overflow: 'hidden'
+                }}
+            >
+                <Table size="small">
+                    <TableHead sx={{ backgroundColor: '#f8f9fa' }}>
+                        <TableRow>
+                            <TableCell 
+                                sx={{ 
+                                    fontWeight: 600, 
+                                    color: '#424242',
+                                    borderBottom: '1px solid #e0e0e0',
+                                    py: 2,
+                                    width: '25%'
+                                }}
+                            >
+                                <Stack direction="row" alignItems="center" spacing={1}>
+                                    <Person sx={{ fontSize: 18, color: '#666' }} />
+                                    <span>ФИО</span>
+                                </Stack>
+                            </TableCell>
+                            <TableCell 
+                                sx={{ 
+                                    fontWeight: 600, 
+                                    color: '#424242',
+                                    borderBottom: '1px solid #e0e0e0',
+                                    py: 2,
+                                    width: '20%'
+                                }}
+                            >
+                                <Stack direction="row" alignItems="center" spacing={1}>
+                                    <Badge sx={{ fontSize: 18, color: '#666' }} />
+                                    <span>Специализация</span>
+                                </Stack>
+                            </TableCell>
+                            <TableCell 
+                                sx={{ 
+                                    fontWeight: 600, 
+                                    color: '#424242',
+                                    borderBottom: '1px solid #e0e0e0',
+                                    py: 2,
+                                    width: '15%'
+                                }}
+                            >
+                                Квалификация
+                            </TableCell>
+                            <TableCell 
+                                sx={{ 
+                                    fontWeight: 600, 
+                                    color: '#424242',
+                                    borderBottom: '1px solid #e0e0e0',
+                                    py: 2,
+                                    width: '15%'
+                                }}
+                            >
+                                <Stack direction="row" alignItems="center" spacing={1}>
+                                    <Phone sx={{ fontSize: 18, color: '#666' }} />
+                                    <span>Телефон</span>
+                                </Stack>
+                            </TableCell>
+                            <TableCell 
+                                sx={{ 
+                                    fontWeight: 600, 
+                                    color: '#424242',
+                                    borderBottom: '1px solid #e0e0e0',
+                                    py: 2,
+                                    width: '15%'
+                                }}
+                            >
+                                <Stack direction="row" alignItems="center" spacing={1}>
+                                    <Email sx={{ fontSize: 18, color: '#666' }} />
+                                    <span>Email</span>
+                                </Stack>
+                            </TableCell>
+                            <TableCell 
+                                align="center"
+                                sx={{ 
+                                    fontWeight: 600, 
+                                    color: '#424242',
+                                    borderBottom: '1px solid #e0e0e0',
+                                    py: 2,
+                                    width: '10%'
+                                }}
+                            >
+                                Действия
+                            </TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {Object.keys(groupedEmployees).length > 0 ? (
+                            Object.keys(groupedEmployees)
+                                .sort((a, b) => {
+                                    // Сортируем группы: "Без специализации" в конец
+                                    if (a === 'Без специализации') return 1;
+                                    if (b === 'Без специализации') return -1;
+                                    return a.localeCompare(b);
+                                })
+                                .map((specializationName, groupIndex) => {
+                                    const group = groupedEmployees[specializationName];
+                                    return (
+                                        <React.Fragment key={specializationName}>
+                                            {/* Заголовок группы специализации */}
+                                            <TableRow>
+                                                <TableCell 
+                                                    colSpan={6}
+                                                    sx={{
+                                                        backgroundColor: '#f0f4ff',
+                                                        borderLeft: '4px solid #1976d2',
+                                                        py: 1.5,
+                                                        fontWeight: 600,
+                                                        color: '#1976d2',
+                                                        fontSize: '0.95rem'
+                                                    }}
+                                                >
+                                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                                        <Badge sx={{ fontSize: 20 }} />
+                                                        <span>{specializationName}</span>
+                                                        <Box 
+                                                            sx={{
+                                                                backgroundColor: '#1976d2',
+                                                                color: 'white',
+                                                                borderRadius: '12px',
+                                                                px: 1.5,
+                                                                py: 0.5,
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 500
+                                                            }}
+                                                        >
+                                                            {group.employees.length} сотр.
+                                                        </Box>
+                                                    </Stack>
+                                                </TableCell>
+                                            </TableRow>
+                                            
+                                            {/* Сотрудники в группе */}
+                                            {group.employees.map((employee, employeeIndex) => (
+                                                <TableRow 
+                                                    key={employee.id} 
+                                                    hover
+                                                    sx={{
+                                                        '&:hover': {
+                                                            backgroundColor: '#f5f7fa'
+                                                        },
+                                                        backgroundColor: employeeIndex % 2 === 0 ? '#ffffff' : '#fafbfc',
+                                                        borderLeft: '4px solid transparent',
+                                                        '&:hover': {
+                                                            backgroundColor: '#f5f7fa',
+                                                            borderLeft: '4px solid #e3f2fd'
+                                                        }
+                                                    }}
+                                                >
+                                                    <TableCell 
+                                                        sx={{ 
+                                                            py: 2,
+                                                            borderBottom: '1px solid #f0f0f0',
+                                                            pl: 3
+                                                        }}
+                                                    >
+                                                        <Typography 
+                                                            variant="body2" 
+                                                            sx={{ 
+                                                                fontWeight: 500,
+                                                                color: '#1a1a1a'
+                                                            }}
+                                                        >
+                                                            {employee.full_name}
+                                                        </Typography>
+                                                    </TableCell>
+                                                    <TableCell 
+                                                        sx={{ 
+                                                            py: 2,
+                                                            borderBottom: '1px solid #f0f0f0'
+                                                        }}
+                                                    >
+                                                        <Typography 
+                                                            variant="body2" 
+                                                            sx={{ 
+                                                                color: '#424242',
+                                                                fontStyle: specializationName === 'Без специализации' ? 'italic' : 'normal',
+                                                                opacity: specializationName === 'Без специализации' ? 0.7 : 1
+                                                            }}
+                                                        >
+                                                            {employee.specialization ? employee.specialization.name : 'Не указана'}
+                                                        </Typography>
+                                                    </TableCell>
+                                                    <TableCell 
+                                                        sx={{ 
+                                                            py: 2,
+                                                            borderBottom: '1px solid #f0f0f0'
+                                                        }}
+                                                    >
+                                                        {employee.qualification ? (
+                                                            <Box 
+                                                                sx={{
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    backgroundColor: '#e8f5e8',
+                                                                    color: '#2e7d32',
+                                                                    borderRadius: '8px',
+                                                                    px: 1.5,
+                                                                    py: 0.5,
+                                                                    fontSize: '0.75rem',
+                                                                    fontWeight: 500
+                                                                }}
+                                                            >
+                                                                {employee.qualification.name}
+                                                            </Box>
+                                                        ) : (
+                                                            <Typography 
+                                                                variant="body2" 
+                                                                sx={{ 
+                                                                    color: '#999',
+                                                                    fontStyle: 'italic'
+                                                                }}
+                                                            >
+                                                                Не указана
+                                                            </Typography>
+                                                        )}
+                                                    </TableCell>
+                                                    <TableCell 
+                                                        sx={{ 
+                                                            py: 2,
+                                                            borderBottom: '1px solid #f0f0f0'
+                                                        }}
+                                                    >
+                                                        <Typography 
+                                                            variant="body2" 
+                                                            sx={{ color: '#424242' }}
+                                                        >
+                                                            {employee.phone || '-'}
+                                                        </Typography>
+                                                    </TableCell>
+                                                    <TableCell 
+                                                        sx={{ 
+                                                            py: 2,
+                                                            borderBottom: '1px solid #f0f0f0'
+                                                        }}
+                                                    >
+                                                        <Typography 
+                                                            variant="body2" 
+                                                            sx={{ color: '#424242' }}
+                                                        >
+                                                            {employee.email || '-'}
+                                                        </Typography>
+                                                    </TableCell>
+                                                    <TableCell 
+                                                        align="center"
+                                                        sx={{ 
+                                                            py: 2,
+                                                            borderBottom: '1px solid #f0f0f0'
+                                                        }}
+                                                    >
+                                                        <Stack direction="row" spacing={0.5} justifyContent="center">
+                                                            <IconButton 
+                                                                size="small" 
+                                                                onClick={() => handleEditEmployee(employee)}
+                                                                sx={{
+                                                                    color: '#1976d2',
+                                                                    '&:hover': {
+                                                                        backgroundColor: 'rgba(25, 118, 210, 0.08)'
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <Edit fontSize="small" />
+                                                            </IconButton>
+                                                            <IconButton 
+                                                                size="small" 
+                                                                onClick={() => handleDeleteEmployee(employee.id)}
+                                                                sx={{
+                                                                    color: '#d32f2f',
+                                                                    '&:hover': {
+                                                                        backgroundColor: 'rgba(211, 47, 47, 0.08)'
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <Delete fontSize="small" />
+                                                            </IconButton>
+                                                        </Stack>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </React.Fragment>
+                                    );
+                                })
+                        ) : (
                             <TableRow>
-                                <TableCell>ФИО</TableCell>
-                                <TableCell>Специализация</TableCell>
-                                <TableCell>Квалификация</TableCell>
-                                <TableCell>Телефон</TableCell>
-                                <TableCell>Email</TableCell>
-                                <TableCell>Действия</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {employees.map((employee) => (
-                                <TableRow key={employee.id} hover>
-                                    <TableCell>{employee.full_name}</TableCell>
-                                    <TableCell>
-                                        {employee.specialization ? employee.specialization.name : '-'}
-                                    </TableCell>
-                                    <TableCell>
-                                        {employee.qualification ? employee.qualification.name : '-'}
-                                    </TableCell>
-                                    <TableCell>{employee.phone || '-'}</TableCell>
-                                    <TableCell>{employee.email || '-'}</TableCell>
-                                    <TableCell>
-                                        <IconButton 
-                                            size="small" 
-                                            onClick={() => handleEditEmployee(employee)}
-                                            color="primary"
-                                        >
-                                            <Edit />
-                                        </IconButton>
-                                        <IconButton 
-                                            size="small" 
-                                            onClick={() => handleDeleteEmployee(employee.id)}
-                                            color="error"
-                                        >
-                                            <Delete />
-                                        </IconButton>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                            {employees.length === 0 && (
-                                <TableRow>
-                                    <TableCell colSpan={6} align="center">
+                                <TableCell 
+                                    colSpan={6} 
+                                    align="center"
+                                    sx={{ 
+                                        py: 6,
+                                        color: '#666'
+                                    }}
+                                >
+                                    <Typography variant="body2">
                                         Нет данных
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </Box>
+                                    </Typography>
+                                </TableCell>
+                            </TableRow>
+                        )}
+                    </TableBody>
+                </Table>
+            </TableContainer>
 
-            {/* Диалог добавления/редактирования сотрудника */}
+            {/* ============ ДИАЛОГ ДОБАВЛЕНИЯ/РЕДАКТИРОВАНИЯ ============ */}
             <Dialog 
                 open={openEmployeeDialog} 
                 onClose={() => setOpenEmployeeDialog(false)}
                 maxWidth="sm"
                 fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.12)'
+                    }
+                }}
             >
-                <DialogTitle sx={{ borderBottom: '1px solid #eee', pb: 2 }}>
+                <DialogTitle 
+                    sx={{ 
+                        borderBottom: '1px solid #e0e0e0', 
+                        pb: 2,
+                        fontWeight: 500
+                    }}
+                >
                     {selectedEmployee ? 'Редактировать сотрудника' : 'Добавить сотрудника'}
                 </DialogTitle>
                 <DialogContent sx={{ pt: 3 }}>
-                    // В компоненте Dialog, заменяем текстовые поля на следующие с улучшенными подсказками:
-                    <TextField
-                        fullWidth
-                        margin="normal"
-                        label="ФИО"
-                        name="full_name"
-                        value={employeeForm.full_name}
-                        onChange={handleEmployeeFormChange}
-                        error={formErrors.full_name}
-                        helperText={formErrors.full_name ? "Обязательное поле. Введите полное имя сотрудника." : "Введите фамилию, имя и отчество сотрудника"}
-                        required
-                    />
-                    <TextField
-                        fullWidth
-                        margin="normal"
-                        label="Номер паспорта"
-                        name="passport_number"
-                        value={employeeForm.passport_number}
-                        onChange={handleEmployeeFormChange}
-                        error={formErrors.passport_number}
-                        helperText={formErrors.passport_number ? "Обязательное поле. Введите серию и номер паспорта." : "Введите серию и номер паспорта без пробелов"}
-                        required
-                    />
-                    <TextField
-                        fullWidth
-                        margin="normal"
-                        label="Телефон"
-                        name="phone"
-                        value={employeeForm.phone}
-                        onChange={handleEmployeeFormChange}
-                        error={formErrors.phone}
-                        helperText={formErrors.phone ? "Неверный формат телефона. Используйте формат +XXXXXXXXXXX (от 10 до 15 цифр)" : "Формат: +XXXXXXXXXXX (например, +79001234567)"}
-                    />
-                    <TextField
-                        fullWidth
-                        margin="normal"
-                        label="Email"
-                        name="email"
-                        value={employeeForm.email}
-                        onChange={handleEmployeeFormChange}
-                        error={formErrors.email}
-                        helperText={formErrors.email ? "Неверный формат email. Используйте формат example@domain.com" : "Формат: example@domain.com"}
-                    />
-                    
-                    {selectedEmployee ? (
-                        <Box sx={{ mt: 2 }}>
-                            <FormControlLabel
-                                control={
-                                    <Checkbox
-                                        checked={changePassword}
-                                        onChange={handleChangePasswordToggle}
-                                    />
-                                }
-                                label="Изменить пароль"
+                    <Stack spacing={2.5}>
+                        {/* Основная информация */}
+                        <Stack spacing={2}>
+                            <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                    color: '#424242',
+                                    fontWeight: 500,
+                                    mb: 1
+                                }}
+                            >
+                                Основная информация
+                            </Typography>
+                            
+                            <TextField
+                                fullWidth
+                                label="ФИО"
+                                name="full_name"
+                                value={employeeForm.full_name}
+                                onChange={handleEmployeeFormChange}
+                                error={formErrors.full_name}
+                                helperText={formErrors.full_name ? "Обязательное поле" : "Фамилия, имя и отчество"}
+                                required
+                                size="small"
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2
+                                    }
+                                }}
                             />
-                            {changePassword && (
+                            
+                            <TextField
+                                fullWidth
+                                label="Номер паспорта"
+                                name="passport_number"
+                                value={employeeForm.passport_number}
+                                onChange={handleEmployeeFormChange}
+                                error={formErrors.passport_number}
+                                helperText={formErrors.passport_number ? "Обязательное поле" : "Серия и номер без пробелов"}
+                                required
+                                size="small"
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2
+                                    }
+                                }}
+                            />
+                        </Stack>
+
+                        <Divider sx={{ my: 1 }} />
+
+                        {/* Контактная информация */}
+                        <Stack spacing={2}>
+                            <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                    color: '#424242',
+                                    fontWeight: 500,
+                                    mb: 1
+                                }}
+                            >
+                                Контактная информация
+                            </Typography>
+                            
+                            <TextField
+                                fullWidth
+                                label="Телефон"
+                                name="phone"
+                                value={employeeForm.phone}
+                                onChange={handleEmployeeFormChange}
+                                error={formErrors.phone}
+                                helperText={formErrors.phone ? "Неверный формат" : "Формат: +79001234567"}
+                                size="small"
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2
+                                    }
+                                }}
+                            />
+                            
+                            <TextField
+                                fullWidth
+                                label="Email"
+                                name="email"
+                                value={employeeForm.email}
+                                onChange={handleEmployeeFormChange}
+                                error={formErrors.email}
+                                helperText={formErrors.email ? "Неверный формат" : "example@domain.com"}
+                                size="small"
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2
+                                    }
+                                }}
+                            />
+                        </Stack>
+
+                        <Divider sx={{ my: 1 }} />
+
+                        {/* Безопасность */}
+                        <Stack spacing={2}>
+                            <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                    color: '#424242',
+                                    fontWeight: 500,
+                                    mb: 1
+                                }}
+                            >
+                                Безопасность
+                            </Typography>
+                            
+                            {selectedEmployee ? (
+                                <Box>
+                                    <FormControlLabel
+                                        control={
+                                            <Checkbox
+                                                checked={changePassword}
+                                                onChange={handleChangePasswordToggle}
+                                                size="small"
+                                            />
+                                        }
+                                        label="Изменить пароль"
+                                        sx={{ mb: changePassword ? 2 : 0 }}
+                                    />
+                                    {changePassword && (
+                                        <TextField
+                                            fullWidth
+                                            label="Новый пароль"
+                                            name="password"
+                                            type="password"
+                                            value={employeeForm.password}
+                                            onChange={handleEmployeeFormChange}
+                                            error={formErrors.password}
+                                            helperText={formErrors.password ? "Обязательное поле" : "Новый пароль для входа"}
+                                            required
+                                            size="small"
+                                            sx={{
+                                                '& .MuiOutlinedInput-root': {
+                                                    borderRadius: 2
+                                                }
+                                            }}
+                                        />
+                                    )}
+                                </Box>
+                            ) : (
                                 <TextField
                                     fullWidth
-                                    margin="normal"
-                                    label="Новый пароль"
+                                    label="Пароль"
                                     name="password"
                                     type="password"
                                     value={employeeForm.password}
                                     onChange={handleEmployeeFormChange}
                                     error={formErrors.password}
-                                    helperText={formErrors.password ? "Обязательное поле. Введите новый пароль." : "Введите новый пароль для сотрудника"}
+                                    helperText={formErrors.password ? "Обязательное поле" : "Пароль для входа в систему"}
                                     required
+                                    size="small"
+                                    sx={{
+                                        '& .MuiOutlinedInput-root': {
+                                            borderRadius: 2
+                                        }
+                                    }}
                                 />
                             )}
-                        </Box>
-                    ) : (
-                        <TextField
-                            fullWidth
-                            margin="normal"
-                            label="Пароль"
-                            name="password"
-                            type="password"
-                            value={employeeForm.password}
-                            onChange={handleEmployeeFormChange}
-                            error={formErrors.password}
-                            helperText={formErrors.password ? "Обязательное поле. Введите пароль для нового сотрудника." : "Введите пароль для нового сотрудника"}
-                            required
-                        />
-                    )}
-                    
-                    <FormControl fullWidth margin="normal">
-                        <InputLabel>Специализация</InputLabel>
-                        <Select
-                            name="specialization_id"
-                            value={employeeForm.specialization_id}
-                            onChange={handleEmployeeFormChange}
-                        >
-                            <MenuItem value="">Не выбрано</MenuItem>
-                            {specializations.map(spec => (
-                                <MenuItem key={spec.id} value={spec.id}>{spec.name}</MenuItem>
-                            ))}
-                        </Select>
-                        <FormHelperText>Выберите специализацию сотрудника из списка доступных</FormHelperText>
-                    </FormControl>
-                    
-                    <FormControl fullWidth margin="normal" disabled={!employeeForm.specialization_id}>
-                        <InputLabel>Квалификация</InputLabel>
-                        <Select
-                            name="qualification_level_id"
-                            value={employeeForm.qualification_level_id}
-                            onChange={handleEmployeeFormChange}
-                        >
-                            <MenuItem value="">Не выбрано</MenuItem>
-                            {availableQualifications.map(qual => (
-                                <MenuItem key={qual.id} value={qual.id}>{qual.name}</MenuItem>
-                            ))}
-                        </Select>
-                        <FormHelperText>
-                            {!employeeForm.specialization_id 
-                                ? "Сначала выберите специализацию" 
-                                : "Выберите квалификацию сотрудника"}
-                        </FormHelperText>
-                    </FormControl>
+                        </Stack>
+
+                        <Divider sx={{ my: 1 }} />
+
+                        {/* Профессиональная информация */}
+                        <Stack spacing={2}>
+                            <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                    color: '#424242',
+                                    fontWeight: 500,
+                                    mb: 1
+                                }}
+                            >
+                                Профессиональная информация
+                            </Typography>
+                            
+                            <FormControl 
+                                fullWidth 
+                                size="small"
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2
+                                    }
+                                }}
+                            >
+                                <InputLabel>Специализация</InputLabel>
+                                <Select
+                                    name="specialization_id"
+                                    value={employeeForm.specialization_id}
+                                    onChange={handleEmployeeFormChange}
+                                    label="Специализация"
+                                >
+                                    <MenuItem value="">Не выбрано</MenuItem>
+                                    {specializations.map(spec => (
+                                        <MenuItem key={spec.id} value={spec.id}>{spec.name}</MenuItem>
+                                    ))}
+                                </Select>
+                                <FormHelperText>Выберите специализацию из списка</FormHelperText>
+                            </FormControl>
+                            
+                            <FormControl 
+                                fullWidth 
+                                size="small"
+                                disabled={!employeeForm.specialization_id}
+                                sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                        borderRadius: 2
+                                    }
+                                }}
+                            >
+                                <InputLabel>Квалификация</InputLabel>
+                                <Select
+                                    name="qualification_level_id"
+                                    value={employeeForm.qualification_level_id}
+                                    onChange={handleEmployeeFormChange}
+                                    label="Квалификация"
+                                >
+                                    <MenuItem value="">Не выбрано</MenuItem>
+                                    {availableQualifications.map(qual => (
+                                        <MenuItem key={qual.id} value={qual.id}>{qual.name}</MenuItem>
+                                    ))}
+                                </Select>
+                                <FormHelperText>
+                                    {!employeeForm.specialization_id 
+                                        ? "Сначала выберите специализацию" 
+                                        : "Выберите уровень квалификации"}
+                                </FormHelperText>
+                            </FormControl>
+                        </Stack>
+                    </Stack>
                 </DialogContent>
-                <DialogActions sx={{ borderTop: '1px solid #eee', p: 2 }}>
+                <DialogActions 
+                    sx={{ 
+                        borderTop: '1px solid #e0e0e0', 
+                        p: 2.5,
+                        gap: 1
+                    }}
+                >
                     <Button 
                         onClick={() => setOpenEmployeeDialog(false)}
-                        sx={{ textTransform: 'none' }}
+                        sx={{ 
+                            textTransform: 'none',
+                            borderRadius: 2,
+                            px: 3
+                        }}
                     >
                         Отмена
                     </Button>
                     <Button 
                         onClick={handleSubmitEmployee} 
                         variant="contained"
-                        sx={{ textTransform: 'none' }}
+                        sx={{ 
+                            textTransform: 'none',
+                            borderRadius: 2,
+                            px: 3,
+                            backgroundColor: '#1976d2',
+                            '&:hover': {
+                                backgroundColor: '#1565c0'
+                            }
+                        }}
                     >
                         {selectedEmployee ? 'Сохранить' : 'Добавить'}
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* Уведомления */}
+            {/* ============ УВЕДОМЛЕНИЯ ============ */}
             <Snackbar 
                 open={snackbar.open} 
-                autoHideDuration={6000} 
+                autoHideDuration={4000} 
                 onClose={handleCloseSnackbar}
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             >
                 <Alert 
                     onClose={handleCloseSnackbar} 
                     severity={snackbar.severity} 
-                    sx={{ width: '100%' }}
+                    sx={{ 
+                        width: '100%',
+                        borderRadius: 2,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                    }}
                 >
                     {snackbar.message}
                 </Alert>

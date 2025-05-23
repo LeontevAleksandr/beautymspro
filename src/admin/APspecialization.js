@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Button, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText, Divider } from '@mui/material';
+import { 
+    Box, Button, TextField, Typography,
+    Paper, Table, TableBody, TableCell, 
+    TableContainer, TableHead, TableRow, IconButton, Dialog, 
+    DialogTitle, DialogContent, DialogActions, List, ListItem, 
+    ListItemText, Stack
+} from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import BadgeIcon from '@mui/icons-material/Badge';
+import SchoolIcon from '@mui/icons-material/School';
+import ViewListIcon from '@mui/icons-material/ViewList';
 import './APspecialization.css';
 
 function APspecialization() {
@@ -294,18 +303,75 @@ function APspecialization() {
             console.error('Ошибка при удалении квалификации из специализации:', error);
         }
     };
-
+    
     return (
-        <Box sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom>
-                Управление специализациями и квалификациями
-            </Typography>
+        <Box sx={{ 
+            p: 3, 
+            backgroundColor: '#fafafa',
+            minHeight: '100vh'
+        }}>
+            {/* ============ ЗАГОЛОВОК ============ */}
+            <Stack 
+                direction={{ xs: 'column', sm: 'row' }} 
+                justifyContent="space-between" 
+                alignItems={{ xs: 'stretch', sm: 'center' }}
+                spacing={2}
+                sx={{ mb: 3 }}
+            >
+                <Box>
+                    <Typography 
+                        variant="h5" 
+                        sx={{ 
+                            fontWeight: 500,
+                            color: '#1a1a1a',
+                            mb: 0.5
+                        }}
+                    >
+                        Управление специализациями
+                    </Typography>
+                    <Typography 
+                        variant="body2" 
+                        sx={{ color: '#666' }}
+                    >
+                        Настройка специализаций и уровней квалификации для сотрудников салона
+                        {specializations.length > 0 && (
+                            <Box component="span" sx={{ ml: 2 }}>
+                                • Всего специализаций: {specializations.length} 
+                                • Уровней квалификации: {qualifications.length}
+                            </Box>
+                        )}
+                    </Typography>
+                </Box>
+            </Stack>
             
-            {/* Секция специализаций */}
-            <Paper sx={{ p: 2, mb: 3 }}>
-                <Typography variant="h6" gutterBottom>
-                    Специализации
-                </Typography>
+            {/* ============ СЕКЦИЯ СПЕЦИАЛИЗАЦИЙ ============ */}
+            <Paper sx={{ 
+                p: 2, 
+                mb: 3, 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.08)', 
+                borderRadius: 3,
+                border: '1px solid #e0e0e0' 
+            }}>
+                <Stack 
+                    direction={{ xs: 'column', sm: 'row' }} 
+                    justifyContent="space-between" 
+                    alignItems={{ xs: 'stretch', sm: 'center' }}
+                    spacing={2}
+                    sx={{ mb: 2 }}
+                >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                        <BadgeIcon sx={{ fontSize: 20, color: '#666' }} />
+                        <Typography 
+                            variant="h6" 
+                            sx={{ 
+                                fontWeight: 500,
+                                color: '#424242'
+                            }}
+                        >
+                            Специализации
+                        </Typography>
+                    </Stack>
+                </Stack>
                 
                 <Box sx={{ mb: 3 }}>
                     <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
@@ -315,30 +381,69 @@ function APspecialization() {
                             value={newSpecialization.name}
                             onChange={handleSpecializationChange}
                             fullWidth
+                            size="small"
+                            sx={{ 
+                                '& .MuiOutlinedInput-root': {
+                                    borderRadius: 2
+                                }
+                            }}
                         />
                         <Button 
                             variant="contained" 
                             color="primary" 
                             onClick={handleAddSpecialization}
-                            sx={{ minWidth: '150px' }}
+                            startIcon={<AddIcon />}
+                            sx={{ 
+                                minWidth: '160px',
+                                borderRadius: 2, 
+                                textTransform: 'none',
+                                backgroundColor: '#1976d2',
+                                boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)'
+                            }}
                         >
                             Добавить
                         </Button>
                     </Box>
                 </Box>
                 
-                <TableContainer>
-                    <Table>
-                        <TableHead>
+                <TableContainer sx={{ border: '1px solid #e0e0e0', borderRadius: 2, overflow: 'hidden' }}>
+                    <Table size="small">
+                        <TableHead sx={{ backgroundColor: '#f8f9fa' }}>
                             <TableRow>
-                                <TableCell>Название</TableCell>
-                                <TableCell>Действия</TableCell>
+                                <TableCell 
+                                    sx={{ 
+                                        fontWeight: 600, 
+                                        color: '#424242',
+                                        borderBottom: '1px solid #e0e0e0',
+                                        py: 2,
+                                        width: '50%'
+                                    }}
+                                >
+                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                        <BadgeIcon sx={{ fontSize: 18, color: '#666' }} />
+                                        <span>Название</span>
+                                    </Stack>
+                                </TableCell>
+                                <TableCell 
+                                    sx={{ 
+                                        fontWeight: 600, 
+                                        color: '#424242',
+                                        borderBottom: '1px solid #e0e0e0',
+                                        py: 2,
+                                        width: '50%'
+                                    }}
+                                >
+                                    Действия
+                                </TableCell>
                             </TableRow>
                         </TableHead>
                         <TableBody>
                             {specializations.map((spec) => (
-                                <TableRow key={spec.id}>
-                                    <TableCell>
+                                <TableRow key={spec.id} sx={{ 
+                                    '&:nth-of-type(odd)': { backgroundColor: '#fafafa' },
+                                    '&:hover': { backgroundColor: '#f5f5f5' }
+                                }}>
+                                    <TableCell sx={{ py: 1.5 }}>
                                         {editingSpecialization && editingSpecialization.id === spec.id ? (
                                             <TextField
                                                 value={editingSpecialization.name}
@@ -346,20 +451,31 @@ function APspecialization() {
                                                     ...editingSpecialization,
                                                     name: e.target.value
                                                 })}
+                                                size="small"
                                                 fullWidth
+                                                sx={{ 
+                                                    '& .MuiOutlinedInput-root': {
+                                                        borderRadius: 2
+                                                    }
+                                                }}
                                             />
                                         ) : (
                                             spec.name
                                         )}
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell sx={{ py: 1.5 }}>
                                         {editingSpecialization && editingSpecialization.id === spec.id ? (
-                                            <Box sx={{ display: 'flex', gap: 1 }}>
+                                            <Stack direction="row" spacing={1}>
                                                 <Button 
                                                     size="small" 
                                                     variant="contained" 
                                                     color="primary" 
                                                     onClick={handleUpdateSpecialization}
+                                                    sx={{ 
+                                                        borderRadius: 2, 
+                                                        textTransform: 'none',
+                                                        boxShadow: 'none'
+                                                    }}
                                                 >
                                                     Сохранить
                                                 </Button>
@@ -367,16 +483,27 @@ function APspecialization() {
                                                     size="small" 
                                                     variant="outlined" 
                                                     onClick={() => setEditingSpecialization(null)}
+                                                    sx={{ 
+                                                        borderRadius: 2, 
+                                                        textTransform: 'none'
+                                                    }}
                                                 >
                                                     Отмена
                                                 </Button>
-                                            </Box>
+                                            </Stack>
                                         ) : (
-                                            <Box sx={{ display: 'flex', gap: 1 }}>
+                                            <Stack direction="row" spacing={1}>
                                                 <Button 
                                                     size="small" 
                                                     variant="outlined" 
                                                     onClick={() => setEditingSpecialization(spec)}
+                                                    startIcon={<EditIcon sx={{ fontSize: 16 }} />}
+                                                    sx={{ 
+                                                        borderRadius: 2, 
+                                                        textTransform: 'none',
+                                                        borderColor: '#1976d2',
+                                                        color: '#1976d2'
+                                                    }}
                                                 >
                                                     Изменить
                                                 </Button>
@@ -385,6 +512,13 @@ function APspecialization() {
                                                     variant="outlined" 
                                                     color="secondary"
                                                     onClick={() => handleOpenSpecializationQualifications(spec)}
+                                                    startIcon={<ViewListIcon sx={{ fontSize: 16 }} />}
+                                                    sx={{ 
+                                                        borderRadius: 2, 
+                                                        textTransform: 'none',
+                                                        borderColor: '#673ab7',
+                                                        color: '#673ab7'
+                                                    }}
                                                 >
                                                     Квалификации
                                                 </Button>
@@ -393,10 +527,15 @@ function APspecialization() {
                                                     variant="outlined" 
                                                     color="error" 
                                                     onClick={() => handleDeleteSpecialization(spec.id)}
+                                                    startIcon={<DeleteIcon sx={{ fontSize: 16 }} />}
+                                                    sx={{ 
+                                                        borderRadius: 2, 
+                                                        textTransform: 'none'
+                                                    }}
                                                 >
                                                     Удалить
                                                 </Button>
-                                            </Box>
+                                            </Stack>
                                         )}
                                     </TableCell>
                                 </TableRow>
@@ -406,12 +545,32 @@ function APspecialization() {
                 </TableContainer>
             </Paper>
             
-            {/* Секция квалификаций */}
-            <Paper sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h6">
-                        Уровни квалификации
-                    </Typography>
+            {/* ============ СЕКЦИЯ КВАЛИФИКАЦИЙ ============ */}
+            <Paper sx={{ 
+                p: 2, 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.08)', 
+                borderRadius: 3,
+                border: '1px solid #e0e0e0' 
+            }}>
+                <Stack 
+                    direction={{ xs: 'column', sm: 'row' }} 
+                    justifyContent="space-between" 
+                    alignItems={{ xs: 'stretch', sm: 'center' }}
+                    spacing={2}
+                    sx={{ mb: 2 }}
+                >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                        <SchoolIcon sx={{ fontSize: 20, color: '#666' }} />
+                        <Typography 
+                            variant="h6" 
+                            sx={{ 
+                                fontWeight: 500,
+                                color: '#424242'
+                            }}
+                        >
+                            Уровни квалификации
+                        </Typography>
+                    </Stack>
                     <Button 
                         variant="contained" 
                         color="primary" 
@@ -421,18 +580,58 @@ function APspecialization() {
                             setNewQualification({ name: '', priority: 1 });
                             setOpenQualificationDialog(true);
                         }}
+                        sx={{ 
+                            minWidth: '220px',
+                            borderRadius: 2, 
+                            textTransform: 'none',
+                            backgroundColor: '#1976d2',
+                            boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)'
+                        }}
                     >
                         Добавить квалификацию
                     </Button>
-                </Box>
+                </Stack>
                 
-                <TableContainer>
-                    <Table>
-                        <TableHead>
+                <TableContainer sx={{ border: '1px solid #e0e0e0', borderRadius: 2, overflow: 'hidden' }}>
+                    <Table size="small">
+                        <TableHead sx={{ backgroundColor: '#f8f9fa' }}>
                             <TableRow>
-                                <TableCell>Приоритет</TableCell>
-                                <TableCell>Название</TableCell>
-                                <TableCell>Действия</TableCell>
+                                <TableCell 
+                                    sx={{ 
+                                        fontWeight: 600, 
+                                        color: '#424242',
+                                        borderBottom: '1px solid #e0e0e0',
+                                        py: 2,
+                                        width: '15%'
+                                    }}
+                                >
+                                    Приоритет
+                                </TableCell>
+                                <TableCell 
+                                    sx={{ 
+                                        fontWeight: 600, 
+                                        color: '#424242',
+                                        borderBottom: '1px solid #e0e0e0',
+                                        py: 2,
+                                        width: '35%'
+                                    }}
+                                >
+                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                        <SchoolIcon sx={{ fontSize: 18, color: '#666' }} />
+                                        <span>Название</span>
+                                    </Stack>
+                                </TableCell>
+                                <TableCell 
+                                    sx={{ 
+                                        fontWeight: 600, 
+                                        color: '#424242',
+                                        borderBottom: '1px solid #e0e0e0',
+                                        py: 2,
+                                        width: '50%'
+                                    }}
+                                >
+                                    Действия
+                                </TableCell>
                             </TableRow>
                         </TableHead>
                         <TableBody>

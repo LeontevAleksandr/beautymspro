@@ -4,40 +4,33 @@ import {
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
     Dialog, DialogActions, DialogContent, DialogTitle,
     FormControl, InputLabel, Select, MenuItem, IconButton,
-    Snackbar, Alert, Checkbox, FormControlLabel, FormGroup, Chip,
-    Tooltip, Divider
+    Snackbar, Alert, Checkbox, FormControlLabel, FormGroup,
+    Tooltip, Divider, Stack
 } from '@mui/material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { LocalizationProvider, DatePicker, TimePicker, StaticDatePicker } from '@mui/x-date-pickers';
+import { LocalizationProvider, TimePicker, StaticDatePicker } from '@mui/x-date-pickers';
 import { ru } from 'date-fns/locale';
 import { 
-    Edit, Delete, Add, Schedule, CalendarMonth, Check, Close, 
-    ArrowBackIos, ArrowForwardIos, Today
+    Delete, Add, Schedule, 
+    ArrowBackIos, ArrowForwardIos, Today, Person, Info
 } from '@mui/icons-material';
 import { 
-    format, parseISO, addDays, subDays, isSameDay, isWeekend, 
-    startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks,
-    startOfMonth, endOfMonth, isWithinInterval, isSameMonth
+    format, addDays, isSameDay, isWeekend, 
+    startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks
 } from 'date-fns';
 
 function APschedule() {
     // Состояния для сотрудников
     const [employees, setEmployees] = useState([]);
-    const [selectedEmployees, setSelectedEmployees] = useState([]);
+    const [selectedEmployees] = useState([]);
     
     // Состояния для графика
     const [schedules, setSchedules] = useState([]);
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [workHours, setWorkHours] = useState({
+    const [workHours] = useState({
         start_time: new Date(new Date().setHours(9, 0, 0)),
         end_time: new Date(new Date().setHours(18, 0, 0))
     });
-    
-    // Состояние для выбранных дат
-    const [selectedDates, setSelectedDates] = useState([]);
-    
-    // Состояние для режима выбора нескольких дат
-    const [multiSelectMode, setMultiSelectMode] = useState(true);
 
     // Состояние для исключений (перерывов)
     const [scheduleExceptions, setScheduleExceptions] = useState([]);
@@ -79,118 +72,6 @@ function APschedule() {
         endTime: new Date(new Date().setHours(14, 0, 0)),
         reason: 'Обеденный перерыв'
     });
-
-    // Проверка, есть ли у рабочего дня исключения (перерывы)
-    const hasExceptions = (date, employeeId) => {
-        const schedule = getScheduleForDay(date, employeeId);
-        if (!schedule) return false;
-        
-        // Преобразуем ID в числовой тип для корректного сравнения
-        const scheduleId = parseInt(schedule.id, 10);
-        
-        // Проверяем, есть ли исключения для этого расписания
-        return scheduleExceptions.some(exc => parseInt(exc.schedule_id, 10) === scheduleId);
-    };
-    
-    // Получение информации о перерывах для тултипа
-    const getExceptionsInfo = (date, employeeId) => {
-        const schedule = getScheduleForDay(date, employeeId);
-        if (!schedule) return '';
-        
-        // Преобразуем ID в числовой тип для корректного сравнения
-        const scheduleId = parseInt(schedule.id, 10);
-        
-        // Фильтруем исключения для данного расписания
-        const exceptions = scheduleExceptions.filter(exc => parseInt(exc.schedule_id, 10) === scheduleId);
-        
-        if (exceptions.length === 0) return '';
-        
-        // Формируем текст для тултипа
-        return exceptions.map(exc => 
-            `${exc.start_time.slice(0, 5)} - ${exc.end_time.slice(0, 5)}: ${exc.reason}`
-        ).join('\n');
-    };
-    
-    // Рендер ячейки календаря
-    const renderCalendarCell = (date, employeeId) => {
-        const isWorking = isWorkingDay(date, employeeId);
-        const hasBreaks = hasExceptions(date, employeeId);
-        const schedule = getScheduleForDay(date, employeeId);
-        
-        // Формируем текст для тултипа
-        let tooltipText = '';
-        if (isWorking) {
-            tooltipText = `Рабочий день: ${schedule.start_time.slice(0, 5)} - ${schedule.end_time.slice(0, 5)}`;
-            
-            const exceptionsInfo = getExceptionsInfo(date, employeeId);
-            if (exceptionsInfo) {
-                tooltipText += `\nПерерывы:\n${exceptionsInfo}`;
-            }
-        }
-        
-        return (
-            <Box 
-                sx={{ 
-                    width: '100%', 
-                    height: '100%',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    bgcolor: isWorking 
-                        ? (hasBreaks ? 'rgba(156, 39, 176, 0.15)' : 'rgba(76, 175, 80, 0.15)') 
-                        : 'transparent',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    '&:hover': {
-                        bgcolor: isWorking 
-                            ? (hasBreaks ? 'rgba(156, 39, 176, 0.25)' : 'rgba(76, 175, 80, 0.25)') 
-                            : 'rgba(0, 0, 0, 0.04)'
-                    }
-                }}
-                onClick={() => openTimeDialog(employeeId, date, isWorking)}
-            >
-                {isWorking ? (
-                    <Tooltip 
-                        title={tooltipText} 
-                        arrow 
-                        placement="top"
-                        enterDelay={500}
-                        leaveDelay={200}
-                    >
-                        <Box sx={{ 
-                            display: 'flex', 
-                            flexDirection: 'column', 
-                            alignItems: 'center',
-                            width: '100%',
-                            height: '100%',
-                            justifyContent: 'center',
-                            p: 0.5
-                        }}>
-                            <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                                {schedule.start_time.slice(0, 5)}
-                            </Typography>
-                            <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                                {schedule.end_time.slice(0, 5)}
-                            </Typography>
-                            {hasBreaks && (
-                                <Box 
-                                    sx={{ 
-                                        width: '80%', 
-                                        height: '3px', 
-                                        bgcolor: 'rgba(156, 39, 176, 0.6)',
-                                        mt: 0.5,
-                                        borderRadius: '2px'
-                                    }} 
-                                />
-                            )}
-                        </Box>
-                    </Tooltip>
-                ) : (
-                    <Box sx={{ width: '100%', height: '100%' }} />
-                )}
-            </Box>
-        );
-    };
     
     // Состояние для уведомлений
     const [snackbar, setSnackbar] = useState({
@@ -198,9 +79,6 @@ function APschedule() {
         message: '',
         severity: 'success'
     });
-
-    // Добавляем состояние для выбора формулы графика
-    const [scheduleFormula, setScheduleFormula] = useState('1/1');
     
     // Добавляем состояние для диалога автоматического заполнения
     const [autoFillDialog, setAutoFillDialog] = useState({
@@ -244,111 +122,12 @@ function APschedule() {
         }
     };
 
-    // Обработчик выбора/отмены выбора сотрудника
-    const handleEmployeeToggle = (employeeId) => {
-        setSelectedEmployees(prev => {
-            if (prev.includes(employeeId)) {
-                return prev.filter(id => id !== employeeId);
-            } else {
-                return [...prev, employeeId];
-            }
-        });
-    };
-
-    // Обработчик изменения рабочих часов
-    const handleWorkHoursChange = (name, value) => {
-        setWorkHours(prev => ({
-            ...prev,
-            [name]: value
-        }));
-    };
-
-    // Обработчик выбора/отмены выбора даты
-    const handleDateToggle = (date) => {
-        setSelectedDates(prev => {
-            const isSelected = prev.some(d => isSameDay(d, date));
-            if (isSelected) {
-                return prev.filter(d => !isSameDay(d, date));
-            } else {
-                return [...prev, date];
-            }
-        });
-    };
-
-    // Проверка, является ли дата рабочей для сотрудника
-    const isWorkingDay = (date, employeeId) => {
-        return schedules.some(schedule => 
-            schedule.employee_id === employeeId && 
-            isSameDay(new Date(schedule.date), date)
-        );
-    };
-
     // Получение рабочего графика для сотрудника на конкретную дату
     const getScheduleForDay = (date, employeeId) => {
         return schedules.find(schedule => 
             schedule.employee_id === employeeId && 
             isSameDay(new Date(schedule.date), date)
         );
-    };
-
-    // Сохранение рабочего графика для выбранных сотрудников и дат
-    const saveSchedules = async () => {
-        if (selectedEmployees.length === 0) {
-            showSnackbar('Выберите хотя бы одного сотрудника', 'warning');
-            return;
-        }
-
-        if (selectedDates.length === 0) {
-            showSnackbar('Выберите хотя бы один день', 'warning');
-            return;
-        }
-
-        const promises = [];
-        
-        // Для каждого выбранного сотрудника и каждой выбранной даты создаем запись в графике
-        for (const employeeId of selectedEmployees) {
-            for (const date of selectedDates) {
-                // Проверяем, существует ли уже запись для этого сотрудника и даты
-                const existingSchedule = schedules.find(s => 
-                    s.employee_id === employeeId && 
-                    isSameDay(new Date(s.date), date)
-                );
-
-                if (!existingSchedule) {
-                    // Если записи нет, создаем новую
-                    const scheduleData = {
-                        employee_id: employeeId,
-                        date: format(date, 'yyyy-MM-dd'),
-                        start_time: format(workHours.start_time, 'HH:mm:ss'),
-                        end_time: format(workHours.end_time, 'HH:mm:ss')
-                    };
-
-                    const promise = fetch('http://localhost:5000/api/schedules', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(scheduleData)
-                    });
-                    
-                    promises.push(promise);
-                }
-            }
-        }
-
-        if (promises.length === 0) {
-            showSnackbar('Все выбранные дни уже назначены как рабочие', 'info');
-            return;
-        }
-
-        try {
-            await Promise.all(promises);
-            showSnackbar('Рабочий график успешно сохранен', 'success');
-            fetchSchedules(); // Обновляем список графиков
-            setSelectedDates([]); // Сбрасываем выбранные даты
-        } catch (error) {
-            showSnackbar('Ошибка при сохранении графика', 'error');
-        }
     };
 
     // Удаление рабочего дня
@@ -722,13 +501,6 @@ function APschedule() {
         }
     };
     
-    // Функция для проверки, входит ли дата в выбранный диапазон
-    const isInSelectedRange = (date) => {
-        return autoFillDialog.selectedRange && 
-               date >= autoFillDialog.startDate && 
-               date <= autoFillDialog.endDate;
-    };
-    
     // Функция для генерации графика по формуле
     const generateScheduleByFormula = (formula, startDate, endDate, employeeIds, customWorkHours) => {
         // Разбираем формулу на рабочие и выходные дни
@@ -814,216 +586,462 @@ function APschedule() {
             showSnackbar('Ошибка при сохранении графика', 'error');
         }
     };
-    
-    // Функция для получения описания формулы
-    const getFormulaDescription = (formula) => {
-        const formulaDescriptions = {
-            '1/1': 'День через день (1 рабочий / 1 выходной)',
-            '1/2': '1 рабочий / 2 выходных',
-            '2/1': '2 рабочих / 1 выходной',
-            '2/2': '2 рабочих / 2 выходных',
-            '3/3': '3 рабочих / 3 выходных',
-            '5/2': 'Стандартная рабочая неделя (5 рабочих / 2 выходных)',
-            '6/1': '6 рабочих / 1 выходной',
-            '7/0': 'Без выходных (7 рабочих / 0 выходных)'
-        };
-        
-        return formulaDescriptions[formula] || formula;
-    };
 
     return (
-        <Box sx={{ p: 2 }}>
-            <Typography variant="h5" align="center" gutterBottom>
-                Управление рабочим графиком
-            </Typography>
-
-            {/* Панель навигации по неделям */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Button 
-                    variant="outlined" 
-                    startIcon={<ArrowBackIos />} 
-                    onClick={goToPreviousWeek}
-                >
-                    Предыдущая неделя
-                </Button>
-                
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="h6" sx={{ mx: 2 }}>
-                        {format(startOfWeek(currentDate, { weekStartsOn: 1 }), 'dd.MM.yyyy')} - {format(endOfWeek(currentDate, { weekStartsOn: 1 }), 'dd.MM.yyyy')}
+        <Box sx={{ 
+            p: 3, 
+            backgroundColor: '#fafafa',
+            minHeight: '100vh'
+        }}>
+            {/* ============ ЗАГОЛОВОК И КНОПКА АВТОЗАПОЛНЕНИЯ ============ */}
+            <Stack 
+                direction={{ xs: 'column', sm: 'row' }} 
+                justifyContent="space-between" 
+                alignItems={{ xs: 'stretch', sm: 'center' }}
+                spacing={2}
+                sx={{ mb: 3 }}
+            >
+                <Box>
+                    <Typography 
+                        variant="h5" 
+                        sx={{ 
+                            fontWeight: 500,
+                            color: '#1a1a1a',
+                            mb: 0.5
+                        }}
+                    >
+                        Управление рабочим графиком
                     </Typography>
-                    <Tooltip title="Текущая неделя">
-                        <IconButton onClick={goToCurrentWeek}>
-                            <Today />
-                        </IconButton>
-                    </Tooltip>
+                    <Typography 
+                        variant="body2" 
+                        sx={{ color: '#666' }}
+                    >
+                        Планирование и редактирование рабочего времени сотрудников
+                        {employees.length > 0 && (
+                            <Box component="span" sx={{ ml: 2 }}>
+                                • Всего сотрудников: {employees.length}
+                            </Box>
+                        )}
+                    </Typography>
                 </Box>
                 
-                <Button 
-                    variant="outlined" 
-                    endIcon={<ArrowForwardIos />} 
-                    onClick={goToNextWeek}
-                >
-                    Следующая неделя
-                </Button>
-            </Box>
-
-            {/* Кнопка автоматического заполнения графика */}
-            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
                 <Button 
                     variant="contained" 
                     color="primary" 
                     startIcon={<Schedule />}
                     onClick={openAutoFillDialog}
+                    size="medium"
+                    sx={{ 
+                        borderRadius: 2, 
+                        textTransform: 'none',
+                        backgroundColor: '#1976d2',
+                        boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)',
+                        minWidth: 240,
+                        '&:hover': {
+                            backgroundColor: '#1565c0',
+                            boxShadow: '0 4px 12px rgba(25, 118, 210, 0.35)'
+                        }
+                    }}
                 >
                     Автоматическое заполнение графика
                 </Button>
-            </Box>
+            </Stack>
+
+            {/* Панель навигации по неделям */}
+            <Stack 
+                direction="row" 
+                justifyContent="space-between" 
+                alignItems="center" 
+                sx={{ 
+                    mb: 3,
+                    p: 2,
+                    backgroundColor: '#fff',
+                    borderRadius: 3,
+                    border: '1px solid #e0e0e0',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                }}
+            >
+                <Button 
+                    variant="outlined" 
+                    startIcon={<ArrowBackIos />} 
+                    onClick={goToPreviousWeek}
+                    size="small"
+                    sx={{ 
+                        borderRadius: 2,
+                        textTransform: 'none'
+                    }}
+                >
+                    Предыдущая неделя
+                </Button>
+                
+                <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                        {format(startOfWeek(currentDate, { weekStartsOn: 1 }), 'dd.MM.yyyy')} - {format(endOfWeek(currentDate, { weekStartsOn: 1 }), 'dd.MM.yyyy')}
+                    </Typography>
+                    <Tooltip title="Текущая неделя">
+                        <IconButton 
+                            onClick={goToCurrentWeek}
+                            size="small"
+                            sx={{ 
+                                color: '#1976d2',
+                                '&:hover': {
+                                    backgroundColor: 'rgba(25, 118, 210, 0.08)'
+                                }
+                            }}
+                        >
+                            <Today fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                </Stack>
+                
+                <Button 
+                    variant="outlined" 
+                    endIcon={<ArrowForwardIos />} 
+                    onClick={goToNextWeek}
+                    size="small"
+                    sx={{ 
+                        borderRadius: 2,
+                        textTransform: 'none'
+                    }}
+                >
+                    Следующая неделя
+                </Button>
+            </Stack>
 
             {/* Таблица с графиком работы */}
-            <Paper sx={{ p: 2, mb: 2, overflowX: 'auto' }}>
-                <TableContainer>
-                    <Table>
-                        <TableHead>
-                            <TableRow>
-                                <TableCell sx={{ minWidth: 200 }}>Сотрудник</TableCell>
-                                {getDaysInWeek().map(day => (
-                                    <TableCell 
-                                        key={day.toISOString()} 
-                                        align="center"
+            <TableContainer 
+                component={Paper} 
+                sx={{ 
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.08)', 
+                    borderRadius: 3,
+                    border: '1px solid #e0e0e0',
+                    overflow: 'hidden',
+                    mb: 3
+                }}
+            >
+                <Table size="small">
+                    <TableHead sx={{ backgroundColor: '#f8f9fa' }}>
+                        <TableRow>
+                            <TableCell 
+                                sx={{ 
+                                    fontWeight: 600, 
+                                    color: '#424242',
+                                    borderBottom: '1px solid #e0e0e0',
+                                    py: 2,
+                                    width: '20%'
+                                }}
+                            >
+                                <Stack direction="row" alignItems="center" spacing={1}>
+                                    <Person sx={{ fontSize: 18, color: '#666' }} />
+                                    <span>Сотрудник</span>
+                                </Stack>
+                            </TableCell>
+                            {getDaysInWeek().map(day => (
+                                <TableCell 
+                                    key={day.toISOString()} 
+                                    align="center"
+                                    sx={{ 
+                                        minWidth: 120,
+                                        backgroundColor: isWeekend(day) ? '#fff4f4' : '#f8f9fa',
+                                        fontWeight: 600, 
+                                        color: '#424242',
+                                        borderBottom: '1px solid #e0e0e0',
+                                        py: 2,
+                                        ...(isSameDay(day, new Date()) && {
+                                            backgroundColor: '#e3f2fd',
+                                            borderLeft: '1px solid #bbdefb',
+                                            borderRight: '1px solid #bbdefb'
+                                        })
+                                    }}
+                                >
+                                    <Typography variant="subtitle2">
+                                        {format(day, 'EEE', { locale: ru })}
+                                    </Typography>
+                                    <Typography variant="body2">
+                                        {format(day, 'dd.MM')}
+                                    </Typography>
+                                </TableCell>
+                            ))}
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {employees.map((employee, employeeIndex) => (
+                            <TableRow 
+                                key={employee.id}
+                                sx={{
+                                    '&:hover': {
+                                        backgroundColor: '#f5f7fa'
+                                    },
+                                    backgroundColor: employeeIndex % 2 === 0 ? '#ffffff' : '#fafbfc',
+                                    borderLeft: '4px solid transparent',
+                                    '&:hover': {
+                                        backgroundColor: '#f5f7fa',
+                                        borderLeft: '4px solid #e3f2fd'
+                                    }
+                                }}
+                            >
+                                <TableCell
+                                    sx={{ 
+                                        py: 2,
+                                        borderBottom: '1px solid #f0f0f0',
+                                        pl: 3
+                                    }}
+                                >
+                                    <Typography 
+                                        variant="body2" 
                                         sx={{ 
-                                            minWidth: 120,
-                                            backgroundColor: isWeekend(day) ? '#ffebee' : 'inherit',
-                                            fontWeight: isSameDay(day, new Date()) ? 'bold' : 'normal',
+                                            fontWeight: 500,
+                                            color: '#1a1a1a'
                                         }}
                                     >
-                                        <Typography variant="subtitle2">
-                                            {format(day, 'EEE', { locale: ru })}
-                                        </Typography>
-                                        <Typography variant="body2">
-                                            {format(day, 'dd.MM')}
-                                        </Typography>
-                                    </TableCell>
-                                ))}
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {employees.map(employee => (
-                                <TableRow key={employee.id}>
-                                    <TableCell>{employee.full_name}</TableCell>
-                                    {getDaysInWeek().map(day => {
-                                        const schedule = getScheduleForDay(day, employee.id);
-                                        const isWorking = !!schedule;
-                                        
-                                        return (
-                                            <TableCell 
-                                                key={day.toISOString()} 
-                                                align="center"
-                                                sx={{ 
-                                                    backgroundColor: isWorking ? '#e8f5e9' : (isWeekend(day) ? '#ffebee' : 'inherit'),
-                                                    cursor: 'pointer',
-                                                    '&:hover': {
-                                                        backgroundColor: isWorking ? '#c8e6c9' : '#f5f5f5',
-                                                    }
-                                                }}
-                                                onClick={() => openTimeDialog(employee.id, day, isWorking)}
-                                            >
-                                                {isWorking ? (
-                                                    <Box>
-                                                        <Typography variant="body2">
-                                                            {formatTimeRange(schedule.start_time, schedule.end_time)}
-                                                        </Typography>
-                                                        <IconButton 
-                                                            size="small" 
-                                                            color="error"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                deleteWorkingDay(employee.id, day);
-                                                            }}
-                                                        >
-                                                            <Delete fontSize="small" />
-                                                        </IconButton>
-                                                    </Box>
-                                                ) : (
-                                                    <IconButton size="small" color="primary">
-                                                        <Add fontSize="small" />
+                                        {employee.full_name}
+                                    </Typography>
+                                </TableCell>
+                                {getDaysInWeek().map(day => {
+                                    const schedule = getScheduleForDay(day, employee.id);
+                                    const isWorking = !!schedule;
+                                    
+                                    return (
+                                        <TableCell 
+                                            key={day.toISOString()} 
+                                            align="center"
+                                            sx={{ 
+                                                py: 1.5,
+                                                borderBottom: '1px solid #f0f0f0',
+                                                backgroundColor: isWorking 
+                                                    ? '#e8f5e9' 
+                                                    : (isWeekend(day) ? '#fff4f4' : 'inherit'),
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s',
+                                                ...(isSameDay(day, new Date()) && {
+                                                    backgroundColor: isWorking ? '#e8f5e9' : '#f5f5f5',
+                                                    borderLeft: '1px solid #e0e0e0',
+                                                    borderRight: '1px solid #e0e0e0'
+                                                }),
+                                                '&:hover': {
+                                                    backgroundColor: isWorking ? '#c8e6c9' : '#f5f5f5',
+                                                    boxShadow: 'inset 0 0 0 1px #e0e0e0'
+                                                }
+                                            }}
+                                            onClick={() => openTimeDialog(employee.id, day, isWorking)}
+                                        >
+                                            {isWorking ? (
+                                                <Box>
+                                                    <Typography 
+                                                        variant="body2"
+                                                        sx={{ fontWeight: 500 }}
+                                                    >
+                                                        {formatTimeRange(schedule.start_time, schedule.end_time)}
+                                                    </Typography>
+                                                    <IconButton 
+                                                        size="small" 
+                                                        color="error"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            deleteWorkingDay(employee.id, day);
+                                                        }}
+                                                        sx={{
+                                                            mt: 0.5,
+                                                            '&:hover': {
+                                                                backgroundColor: 'rgba(211, 47, 47, 0.08)'
+                                                            }
+                                                        }}
+                                                    >
+                                                        <Delete fontSize="small" />
                                                     </IconButton>
-                                                )}
-                                            </TableCell>
-                                        );
-                                    })}
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </Paper>
+                                                </Box>
+                                            ) : (
+                                                <IconButton 
+                                                    size="small" 
+                                                    color="primary"
+                                                    sx={{
+                                                        '&:hover': {
+                                                            backgroundColor: 'rgba(25, 118, 210, 0.08)'
+                                                        }
+                                                    }}
+                                                >
+                                                    <Add fontSize="small" />
+                                                </IconButton>
+                                            )}
+                                        </TableCell>
+                                    );
+                                })}
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </TableContainer>
 
             {/* Диалог добавления/редактирования рабочего времени */}
-            <Dialog open={timeDialog.open} onClose={closeTimeDialog} maxWidth="md" fullWidth>
-                <DialogTitle>
+            <Dialog 
+                open={timeDialog.open} 
+                onClose={closeTimeDialog} 
+                maxWidth="md" 
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.12)'
+                    }
+                }}
+            >
+                <DialogTitle 
+                    sx={{ 
+                        borderBottom: '1px solid #e0e0e0', 
+                        pb: 2,
+                        fontWeight: 500
+                    }}
+                >
                     {timeDialog.isEdit ? 'Редактировать рабочее время' : 'Добавить рабочий день'}
                 </DialogTitle>
-                <DialogContent>
-                    <Grid container spacing={2} sx={{ mt: 1 }}>
-                        <Grid item xs={12}>
-                            <Typography variant="subtitle1">
-                                Сотрудник: {timeDialog.employeeId ? getEmployeeName(timeDialog.employeeId) : ''}
+                <DialogContent sx={{ pt: 3 }}>
+                    <Stack spacing={2.5}>
+                        {/* Основная информация */}
+                        <Stack spacing={2}>
+                            <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                    color: '#424242',
+                                    fontWeight: 500,
+                                    mb: 1
+                                }}
+                            >
+                                Информация о рабочем дне
                             </Typography>
-                            <Typography variant="subtitle1">
-                                Дата: {timeDialog.date ? format(timeDialog.date, 'dd.MM.yyyy, EEEE', { locale: ru }) : ''}
-                            </Typography>
-                        </Grid>
-                        <Grid item xs={6}>
-                            <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
-                                <TimePicker
-                                    label="Начало рабочего дня"
-                                    value={timeDialog.startTime}
-                                    onChange={(newValue) => setTimeDialog(prev => ({ ...prev, startTime: newValue }))}
-                                    renderInput={(params) => <TextField {...params} fullWidth />}
-                                />
-                            </LocalizationProvider>
-                        </Grid>
-                        <Grid item xs={6}>
-                            <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
-                                <TimePicker
-                                    label="Конец рабочего дня"
-                                    value={timeDialog.endTime}
-                                    onChange={(newValue) => setTimeDialog(prev => ({ ...prev, endTime: newValue }))}
-                                    renderInput={(params) => <TextField {...params} fullWidth />}
-                                />
-                            </LocalizationProvider>
-                        </Grid>
+                            
+                            <Box sx={{ 
+                                p: 2, 
+                                backgroundColor: '#f8f9fa', 
+                                borderRadius: 2,
+                                border: '1px solid #e0e0e0'
+                            }}>
+                                <Grid container spacing={2}>
+                                    <Grid item xs={12} sm={6}>
+                                        <Typography variant="body2" color="textSecondary">
+                                            Сотрудник:
+                                        </Typography>
+                                        <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                                            {timeDialog.employeeId ? getEmployeeName(timeDialog.employeeId) : ''}
+                                        </Typography>
+                                    </Grid>
+                                    <Grid item xs={12} sm={6}>
+                                        <Typography variant="body2" color="textSecondary">
+                                            Дата:
+                                        </Typography>
+                                        <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                                            {timeDialog.date ? format(timeDialog.date, 'dd.MM.yyyy, EEEE', { locale: ru }) : ''}
+                                        </Typography>
+                                    </Grid>
+                                </Grid>
+                            </Box>
+                            
+                            <Grid container spacing={2}>
+                                <Grid item xs={12} sm={6}>
+                                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
+                                        <TimePicker
+                                            label="Начало рабочего дня"
+                                            value={timeDialog.startTime}
+                                            onChange={(newValue) => setTimeDialog(prev => ({ ...prev, startTime: newValue }))}
+                                            renderInput={(params) => 
+                                                <TextField 
+                                                    {...params} 
+                                                    fullWidth 
+                                                    size="small"
+                                                    sx={{
+                                                        '& .MuiOutlinedInput-root': {
+                                                            borderRadius: 2
+                                                        }
+                                                    }}
+                                                />
+                                            }
+                                        />
+                                    </LocalizationProvider>
+                                </Grid>
+                                <Grid item xs={12} sm={6}>
+                                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
+                                        <TimePicker
+                                            label="Конец рабочего дня"
+                                            value={timeDialog.endTime}
+                                            onChange={(newValue) => setTimeDialog(prev => ({ ...prev, endTime: newValue }))}
+                                            renderInput={(params) => 
+                                                <TextField 
+                                                    {...params} 
+                                                    fullWidth 
+                                                    size="small"
+                                                    sx={{
+                                                        '& .MuiOutlinedInput-root': {
+                                                            borderRadius: 2
+                                                        }
+                                                    }}
+                                                />
+                                            }
+                                        />
+                                    </LocalizationProvider>
+                                </Grid>
+                            </Grid>
+                        </Stack>
+
+                        <Divider sx={{ my: 1 }} />
                         
                         {/* Секция исключений (перерывов) */}
-                        <Grid item xs={12} sx={{ mt: 2 }}>
-                            <Typography variant="h6">Перерывы</Typography>
-                            <Divider sx={{ mb: 2 }} />
+                        <Stack spacing={2}>
+                            <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                    color: '#424242',
+                                    fontWeight: 500,
+                                    mb: 1
+                                }}
+                            >
+                                Перерывы
+                            </Typography>
                             
                             {/* Список существующих исключений */}
                             {timeDialog.exceptions.length > 0 ? (
-                                <TableContainer component={Paper} sx={{ mb: 2 }}>
+                                <TableContainer 
+                                    component={Paper} 
+                                    sx={{ 
+                                        mb: 2,
+                                        boxShadow: 'none',
+                                        border: '1px solid #e0e0e0',
+                                        borderRadius: 2,
+                                        overflow: 'hidden'
+                                    }}
+                                >
                                     <Table size="small">
-                                        <TableHead>
+                                        <TableHead sx={{ backgroundColor: '#f8f9fa' }}>
                                             <TableRow>
-                                                <TableCell>Начало</TableCell>
-                                                <TableCell>Конец</TableCell>
-                                                <TableCell>Причина</TableCell>
-                                                <TableCell>Действия</TableCell>
+                                                <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Начало</TableCell>
+                                                <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Конец</TableCell>
+                                                <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Причина</TableCell>
+                                                <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Действия</TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
                                             {timeDialog.exceptions.map((exception, index) => (
-                                                <TableRow key={index}>
-                                                    <TableCell>{format(exception.startTime, 'HH:mm')}</TableCell>
-                                                    <TableCell>{format(exception.endTime, 'HH:mm')}</TableCell>
-                                                    <TableCell>{exception.reason}</TableCell>
-                                                    <TableCell>
+                                                <TableRow 
+                                                    key={index}
+                                                    sx={{
+                                                        '&:hover': {
+                                                            backgroundColor: '#f5f7fa'
+                                                        }
+                                                    }}
+                                                >
+                                                    <TableCell sx={{ py: 1.5 }}>{format(exception.startTime, 'HH:mm')}</TableCell>
+                                                    <TableCell sx={{ py: 1.5 }}>{format(exception.endTime, 'HH:mm')}</TableCell>
+                                                    <TableCell sx={{ py: 1.5 }}>{exception.reason}</TableCell>
+                                                    <TableCell sx={{ py: 1.5 }}>
                                                         <IconButton 
                                                             size="small" 
                                                             color="error"
                                                             onClick={() => handleDeleteException(index)}
+                                                            sx={{
+                                                                '&:hover': {
+                                                                    backgroundColor: 'rgba(211, 47, 47, 0.08)'
+                                                                }
+                                                            }}
                                                         >
-                                                            <Delete />
+                                                            <Delete fontSize="small" />
                                                         </IconButton>
                                                     </TableCell>
                                                 </TableRow>
@@ -1038,8 +1056,24 @@ function APschedule() {
                             )}
                             
                             {/* Форма добавления нового исключения */}
-                            <Paper sx={{ p: 2, bgcolor: 'background.default' }}>
-                                <Typography variant="subtitle2" sx={{ mb: 1 }}>Добавить перерыв</Typography>
+                            <Paper 
+                                sx={{ 
+                                    p: 2, 
+                                    bgcolor: '#f8f9fa',
+                                    border: '1px solid #e0e0e0',
+                                    borderRadius: 2,
+                                    boxShadow: 'none'
+                                }}
+                            >
+                                <Typography 
+                                    variant="subtitle2" 
+                                    sx={{ 
+                                        mb: 1.5,
+                                        fontWeight: 500
+                                    }}
+                                >
+                                    Добавить перерыв
+                                </Typography>
                                 <Grid container spacing={2}>
                                     <Grid item xs={12} sm={4}>
                                         <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
@@ -1047,7 +1081,18 @@ function APschedule() {
                                                 label="Начало перерыва"
                                                 value={newException.startTime}
                                                 onChange={(newValue) => handleExceptionChange('startTime', newValue)}
-                                                renderInput={(params) => <TextField {...params} fullWidth size="small" />}
+                                                renderInput={(params) => 
+                                                    <TextField 
+                                                        {...params} 
+                                                        fullWidth 
+                                                        size="small"
+                                                        sx={{
+                                                            '& .MuiOutlinedInput-root': {
+                                                                borderRadius: 2
+                                                            }
+                                                        }}
+                                                    />
+                                                }
                                             />
                                         </LocalizationProvider>
                                     </Grid>
@@ -1057,7 +1102,18 @@ function APschedule() {
                                                 label="Конец перерыва"
                                                 value={newException.endTime}
                                                 onChange={(newValue) => handleExceptionChange('endTime', newValue)}
-                                                renderInput={(params) => <TextField {...params} fullWidth size="small" />}
+                                                renderInput={(params) => 
+                                                    <TextField 
+                                                        {...params} 
+                                                        fullWidth 
+                                                        size="small"
+                                                        sx={{
+                                                            '& .MuiOutlinedInput-root': {
+                                                                borderRadius: 2
+                                                            }
+                                                        }}
+                                                    />
+                                                }
                                             />
                                         </LocalizationProvider>
                                     </Grid>
@@ -1068,6 +1124,11 @@ function APschedule() {
                                             onChange={(e) => handleExceptionChange('reason', e.target.value)}
                                             fullWidth
                                             size="small"
+                                            sx={{
+                                                '& .MuiOutlinedInput-root': {
+                                                    borderRadius: 2
+                                                }
+                                            }}
                                         />
                                     </Grid>
                                     <Grid item xs={12}>
@@ -1076,18 +1137,51 @@ function APschedule() {
                                             startIcon={<Add />}
                                             onClick={handleAddException}
                                             fullWidth
+                                            sx={{ 
+                                                borderRadius: 2,
+                                                textTransform: 'none',
+                                                mt: 1
+                                            }}
                                         >
                                             Добавить перерыв
                                         </Button>
                                     </Grid>
                                 </Grid>
                             </Paper>
-                        </Grid>
-                    </Grid>
+                        </Stack>
+                    </Stack>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={closeTimeDialog}>Отмена</Button>
-                    <Button onClick={saveTimeDialog} variant="contained" color="primary">
+                <DialogActions 
+                    sx={{ 
+                        borderTop: '1px solid #e0e0e0', 
+                        p: 2.5,
+                        gap: 1
+                    }}
+                >
+                    <Button 
+                        onClick={closeTimeDialog}
+                        sx={{ 
+                            textTransform: 'none',
+                            borderRadius: 2,
+                            px: 3
+                        }}
+                    >
+                        Отмена
+                    </Button>
+                    <Button 
+                        onClick={saveTimeDialog} 
+                        variant="contained" 
+                        color="primary"
+                        sx={{ 
+                            textTransform: 'none',
+                            borderRadius: 2,
+                            px: 3,
+                            backgroundColor: '#1976d2',
+                            '&:hover': {
+                                backgroundColor: '#1565c0'
+                            }
+                        }}
+                    >
                         Сохранить
                     </Button>
                 </DialogActions>
@@ -1099,177 +1193,380 @@ function APschedule() {
                 onClose={closeAutoFillDialog}
                 maxWidth="md"
                 fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                        overflow: 'hidden'
+                    }
+                }}
             >
-                <DialogTitle>
-                    Автоматическое заполнение графика
+                <DialogTitle 
+                    sx={{ 
+                        borderBottom: '1px solid #e0e0e0', 
+                        pb: 2,
+                        fontWeight: 500,
+                        backgroundColor: '#f8f9fa'
+                    }}
+                >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                        <Schedule sx={{ fontSize: 20, color: '#1976d2' }} />
+                        <span>Автоматическое заполнение графика</span>
+                    </Stack>
                 </DialogTitle>
-                <DialogContent>
-                    <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle1" gutterBottom>
-                            Выберите формулу графика:
-                        </Typography>
-                        <FormControl fullWidth sx={{ mb: 3 }}>
-                            <InputLabel>Формула графика</InputLabel>
-                            <Select
-                                value={autoFillDialog.formula}
-                                onChange={(e) => handleAutoFillChange('formula', e.target.value)}
-                                label="Формула графика"
-                            >
-                                <MenuItem value="1/1">1/1 - День через день</MenuItem>
-                                <MenuItem value="1/2">1/2 - 1 рабочий / 2 выходных</MenuItem>
-                                <MenuItem value="2/1">2/1 - 2 рабочих / 1 выходной</MenuItem>
-                                <MenuItem value="2/2">2/2 - 2 рабочих / 2 выходных</MenuItem>
-                                <MenuItem value="3/3">3/3 - 3 рабочих / 3 выходных</MenuItem>
-                                <MenuItem value="5/2">5/2 - Стандартная рабочая неделя</MenuItem>
-                                <MenuItem value="6/1">6/1 - 6 рабочих / 1 выходной</MenuItem>
-                                <MenuItem value="7/0">7/0 - Без выходных</MenuItem>
-                            </Select>
-                        </FormControl>
-                        
-                        {/* Добавляем выбор рабочих часов */}
-                        <Typography variant="subtitle1" gutterBottom>
-                            Укажите рабочие часы:
-                        </Typography>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-                            <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
-                                <TimePicker
-                                    label="Время начала"
-                                    value={autoFillDialog.workHours.start_time}
-                                    onChange={(newTime) => {
-                                        setAutoFillDialog(prev => ({
-                                            ...prev,
-                                            workHours: {
-                                                ...prev.workHours,
-                                                start_time: newTime
-                                            }
-                                        }));
+                <DialogContent sx={{ pt: 3, pb: 2, backgroundColor: '#fafafa' }}>
+                    <Box sx={{ mt: 1 }}>
+                        {/* Формула графика */}
+                        <Stack spacing={2.5}>
+                            <Box>
+                                <Typography 
+                                    variant="subtitle2" 
+                                    sx={{ 
+                                        color: '#424242',
+                                        fontWeight: 500,
+                                        mb: 1
                                     }}
-                                    renderInput={(params) => <TextField {...params} sx={{ width: '48%' }} />}
-                                />
-                                <TimePicker
-                                    label="Время окончания"
-                                    value={autoFillDialog.workHours.end_time}
-                                    onChange={(newTime) => {
-                                        setAutoFillDialog(prev => ({
-                                            ...prev,
-                                            workHours: {
-                                                ...prev.workHours,
-                                                end_time: newTime
-                                            }
-                                        }));
+                                >
+                                    Выберите формулу графика:
+                                </Typography>
+                                <FormControl 
+                                    fullWidth 
+                                    size="small" 
+                                    sx={{ 
+                                        mb: 2,
+                                        '& .MuiOutlinedInput-root': {
+                                            borderRadius: 2
+                                        }
                                     }}
-                                    renderInput={(params) => <TextField {...params} sx={{ width: '48%' }} />}
-                                />
-                            </LocalizationProvider>
-                        </Box>
-                        
-                        <Typography variant="subtitle1" gutterBottom>
-                            Выберите диапазон дат для заполнения графика:
-                        </Typography>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                            <Box sx={{ width: '48%' }}>
-                                <Typography variant="body2" color="textSecondary" gutterBottom>
-                                    {autoFillDialog.selectedRange 
-                                        ? 'Выбрана начальная дата. Выберите конечную дату.' 
-                                        : 'Выберите начальную дату диапазона'}
-                                </Typography>
-                                <Paper elevation={3} sx={{ p: 1, mb: 2, bgcolor: autoFillDialog.selectedRange ? '#e3f2fd' : 'inherit' }}>
-                                    <Typography>
-                                        Начало: {format(autoFillDialog.startDate, 'dd.MM.yyyy')}
-                                    </Typography>
-                                    <Typography>
-                                        Конец: {format(autoFillDialog.endDate, 'dd.MM.yyyy')}
-                                    </Typography>
-                                </Paper>
+                                >
+                                    <InputLabel>Формула графика</InputLabel>
+                                    <Select
+                                        value={autoFillDialog.formula}
+                                        onChange={(e) => handleAutoFillChange('formula', e.target.value)}
+                                        label="Формула графика"
+                                    >
+                                        <MenuItem value="1/1">1/1 - День через день</MenuItem>
+                                        <MenuItem value="1/2">1/2 - 1 рабочий / 2 выходных</MenuItem>
+                                        <MenuItem value="2/1">2/1 - 2 рабочих / 1 выходной</MenuItem>
+                                        <MenuItem value="2/2">2/2 - 2 рабочих / 2 выходных</MenuItem>
+                                        <MenuItem value="3/3">3/3 - 3 рабочих / 3 выходных</MenuItem>
+                                        <MenuItem value="5/2">5/2 - Стандартная рабочая неделя</MenuItem>
+                                        <MenuItem value="6/1">6/1 - 6 рабочих / 1 выходной</MenuItem>
+                                        <MenuItem value="7/0">7/0 - Без выходных</MenuItem>
+                                    </Select>
+                                </FormControl>
                             </Box>
-                            <Box sx={{ width: '48%' }}>
-                                <Typography variant="body2" color="textSecondary" gutterBottom>
-                                    Количество дней: {
-                                        Math.floor((autoFillDialog.endDate - autoFillDialog.startDate) / (1000 * 60 * 60 * 24)) + 1
-                                    }
+                            
+                            <Divider sx={{ my: 1 }} />
+                            
+                            {/* Рабочие часы */}
+                            <Box>
+                                <Typography 
+                                    variant="subtitle2" 
+                                    sx={{ 
+                                        color: '#424242',
+                                        fontWeight: 500,
+                                        mb: 1
+                                    }}
+                                >
+                                    Укажите рабочие часы:
                                 </Typography>
-                            </Box>
-                        </Box>
-                        
-                        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
-                            <StaticDatePicker
-                                displayStaticWrapperAs="desktop"
-                                value={autoFillDialog.startDate}
-                                onChange={handleDateRangeSelect}
-                                renderInput={(params) => <TextField {...params} />}
-                                renderDay={(day, _value, DayComponentProps) => {
-                                    const isStart = isSameDay(day, autoFillDialog.startDate);
-                                    const isEnd = isSameDay(day, autoFillDialog.endDate);
-                                    const isInRange = day >= autoFillDialog.startDate && day <= autoFillDialog.endDate;
-                                    
-                                    let dayStyle = {};
-                                    if (isStart || isEnd) {
-                                        dayStyle = {
-                                            backgroundColor: '#1976d2',
-                                            color: 'white',
-                                            borderRadius: isStart && isEnd ? '50%' : isStart ? '50% 0 0 50%' : '0 50% 50% 0'
-                                        };
-                                    } else if (isInRange) {
-                                        dayStyle = {
-                                            backgroundColor: '#bbdefb',
-                                            borderRadius: 0
-                                        };
-                                    }
-                                    
-                                    return (
-                                        <Box
-                                            sx={{
-                                                ...dayStyle,
-                                                display: 'flex',
-                                                justifyContent: 'center',
-                                                alignItems: 'center',
-                                                width: 36,
-                                                height: 36
+                                <Stack 
+                                    direction={{ xs: 'column', sm: 'row' }} 
+                                    spacing={2} 
+                                    sx={{ mb: 2 }}
+                                >
+                                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
+                                        <TimePicker
+                                            label="Время начала"
+                                            value={autoFillDialog.workHours.start_time}
+                                            onChange={(newTime) => {
+                                                setAutoFillDialog(prev => ({
+                                                    ...prev,
+                                                    workHours: {
+                                                        ...prev.workHours,
+                                                        start_time: newTime
+                                                    }
+                                                }));
                                             }}
-                                        >
-                                            <DayComponentProps.day />
+                                            renderInput={(params) => 
+                                                <TextField 
+                                                    {...params} 
+                                                    fullWidth 
+                                                    size="small"
+                                                    sx={{ 
+                                                        '& .MuiOutlinedInput-root': {
+                                                            borderRadius: 2
+                                                        }
+                                                    }} 
+                                                />
+                                            }
+                                        />
+                                        <TimePicker
+                                            label="Время окончания"
+                                            value={autoFillDialog.workHours.end_time}
+                                            onChange={(newTime) => {
+                                                setAutoFillDialog(prev => ({
+                                                    ...prev,
+                                                    workHours: {
+                                                        ...prev.workHours,
+                                                        end_time: newTime
+                                                    }
+                                                }));
+                                            }}
+                                            renderInput={(params) => 
+                                                <TextField 
+                                                    {...params} 
+                                                    fullWidth 
+                                                    size="small"
+                                                    sx={{ 
+                                                        '& .MuiOutlinedInput-root': {
+                                                            borderRadius: 2
+                                                        }
+                                                    }} 
+                                                />
+                                            }
+                                        />
+                                    </LocalizationProvider>
+                                </Stack>
+                            </Box>
+                            
+                            <Divider sx={{ my: 1 }} />
+                            
+                            {/* Диапазон дат */}
+                            <Box>
+                                <Typography 
+                                    variant="subtitle2" 
+                                    sx={{ 
+                                        color: '#424242',
+                                        fontWeight: 500,
+                                        mb: 1
+                                    }}
+                                >
+                                    Выберите диапазон дат для заполнения графика:
+                                </Typography>
+                                <Stack 
+                                    direction={{ xs: 'column', sm: 'row' }} 
+                                    spacing={2} 
+                                    sx={{ mb: 2 }}
+                                >
+                                    <Paper 
+                                        elevation={0} 
+                                        sx={{ 
+                                            p: 2, 
+                                            mb: 1, 
+                                            bgcolor: autoFillDialog.selectedRange ? '#e3f2fd' : '#f5f5f5',
+                                            border: '1px solid #e0e0e0',
+                                            borderRadius: 2,
+                                            flex: 1
+                                        }}
+                                    >
+                                        <Typography variant="body2" color="textSecondary" gutterBottom>
+                                            {autoFillDialog.selectedRange 
+                                                ? 'Выбрана начальная дата. Выберите конечную дату.' 
+                                                : 'Выберите начальную дату диапазона'}
+                                        </Typography>
+                                        <Stack direction="row" spacing={2} alignItems="center">
+                                            <Box>
+                                                <Typography variant="caption" color="textSecondary">Начало:</Typography>
+                                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                                    {format(autoFillDialog.startDate, 'dd.MM.yyyy')}
+                                                </Typography>
+                                            </Box>
+                                            <Box sx={{ color: '#9e9e9e' }}>—</Box>
+                                            <Box>
+                                                <Typography variant="caption" color="textSecondary">Конец:</Typography>
+                                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                                    {format(autoFillDialog.endDate, 'dd.MM.yyyy')}
+                                                </Typography>
+                                            </Box>
+                                        </Stack>
+                                    </Paper>
+                                    
+                                    <Paper 
+                                        elevation={0} 
+                                        sx={{ 
+                                            p: 2, 
+                                            mb: 1, 
+                                            bgcolor: '#f5f5f5',
+                                            border: '1px solid #e0e0e0',
+                                            borderRadius: 2,
+                                            flex: 1,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        <Box sx={{ textAlign: 'center' }}>
+                                            <Typography variant="caption" color="textSecondary">Количество дней:</Typography>
+                                            <Typography variant="h6" sx={{ fontWeight: 500, color: '#1976d2' }}>
+                                                {Math.floor((autoFillDialog.endDate - autoFillDialog.startDate) / (1000 * 60 * 60 * 24)) + 1}
+                                            </Typography>
                                         </Box>
-                                    );
-                                }}
-                            />
-                        </LocalizationProvider>
-                        
-                        <Typography variant="subtitle1" gutterBottom sx={{ mt: 3 }}>
-                            Выберите сотрудников:
-                        </Typography>
-                        <FormGroup sx={{ mb: 2 }}>
-                            {employees.map(employee => (
-                                <FormControlLabel
-                                    key={employee.id}
-                                    control={
-                                        <Checkbox
-                                            checked={autoFillDialog.employees.includes(employee.id)}
-                                            onChange={() => {
-                                                const newEmployees = autoFillDialog.employees.includes(employee.id)
-                                                    ? autoFillDialog.employees.filter(id => id !== employee.id)
-                                                    : [...autoFillDialog.employees, employee.id];
-                                                handleAutoFillChange('employees', newEmployees);
+                                    </Paper>
+                                </Stack>
+                                
+                                <Paper 
+                                    elevation={0} 
+                                    sx={{ 
+                                        p: 1, 
+                                        border: '1px solid #e0e0e0',
+                                        borderRadius: 2,
+                                        bgcolor: 'white'
+                                    }}
+                                >
+                                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
+                                        <StaticDatePicker
+                                            displayStaticWrapperAs="desktop"
+                                            value={autoFillDialog.startDate}
+                                            onChange={handleDateRangeSelect}
+                                            renderInput={(params) => <TextField {...params} />}
+                                            renderDay={(day, _value, DayComponentProps) => {
+                                                const isStart = isSameDay(day, autoFillDialog.startDate);
+                                                const isEnd = isSameDay(day, autoFillDialog.endDate);
+                                                const isInRange = day >= autoFillDialog.startDate && day <= autoFillDialog.endDate;
+                                                
+                                                let dayStyle = {};
+                                                if (isStart || isEnd) {
+                                                    dayStyle = {
+                                                        backgroundColor: '#1976d2',
+                                                        color: 'white',
+                                                        borderRadius: isStart && isEnd ? '50%' : isStart ? '50% 0 0 50%' : '0 50% 50% 0'
+                                                    };
+                                                } else if (isInRange) {
+                                                    dayStyle = {
+                                                        backgroundColor: '#bbdefb',
+                                                        borderRadius: 0
+                                                    };
+                                                }
+                                                
+                                                return (
+                                                    <Box
+                                                        sx={{
+                                                            ...dayStyle,
+                                                            display: 'flex',
+                                                            justifyContent: 'center',
+                                                            alignItems: 'center',
+                                                            width: 36,
+                                                            height: 36
+                                                        }}
+                                                    >
+                                                        <DayComponentProps.day />
+                                                    </Box>
+                                                );
                                             }}
                                         />
-                                    }
-                                    label={employee.full_name}
-                                />
-                            ))}
-                        </FormGroup>
-                        
-                        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-                            График будет сгенерирован в выбранном диапазоне дат.
-                            Существующие записи не будут перезаписаны.
-                        </Typography>
+                                    </LocalizationProvider>
+                                </Paper>
+                            </Box>
+                            
+                            <Divider sx={{ my: 1 }} />
+                            
+                            {/* Выбор сотрудников */}
+                            <Box>
+                                <Typography 
+                                    variant="subtitle2" 
+                                    sx={{ 
+                                        color: '#424242',
+                                        fontWeight: 500,
+                                        mb: 1
+                                    }}
+                                >
+                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                        <Person sx={{ fontSize: 18, color: '#666' }} />
+                                        <span>Выберите сотрудников:</span>
+                                    </Stack>
+                                </Typography>
+                                
+                                <Paper 
+                                    elevation={0} 
+                                    sx={{ 
+                                        p: 2, 
+                                        border: '1px solid #e0e0e0',
+                                        borderRadius: 2,
+                                        bgcolor: 'white',
+                                        maxHeight: '200px',
+                                        overflow: 'auto'
+                                    }}
+                                >
+                                    <FormGroup sx={{ mb: 1 }}>
+                                        {employees.map(employee => (
+                                            <FormControlLabel
+                                                key={employee.id}
+                                                control={
+                                                    <Checkbox
+                                                        size="small"
+                                                        checked={autoFillDialog.employees.includes(employee.id)}
+                                                        onChange={() => {
+                                                            const newEmployees = autoFillDialog.employees.includes(employee.id)
+                                                                ? autoFillDialog.employees.filter(id => id !== employee.id)
+                                                                : [...autoFillDialog.employees, employee.id];
+                                                            handleAutoFillChange('employees', newEmployees);
+                                                        }}
+                                                        sx={{
+                                                            '&.Mui-checked': {
+                                                                color: '#1976d2'
+                                                            }
+                                                        }}
+                                                    />
+                                                }
+                                                label={
+                                                    <Typography variant="body2">{employee.full_name}</Typography>
+                                                }
+                                                sx={{ mb: 0.5 }}
+                                            />
+                                        ))}
+                                    </FormGroup>
+                                </Paper>
+                                
+                                <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 2, border: '1px solid #e0e0e0' }}>
+                                    <Typography variant="body2" color="textSecondary">
+                                        <Stack direction="row" spacing={1} alignItems="center">
+                                            <Info sx={{ fontSize: 16, color: '#1976d2' }} />
+                                            <span>График будет сгенерирован в выбранном диапазоне дат.
+                                            Существующие записи не будут перезаписаны.</span>
+                                        </Stack>
+                                    </Typography>
+                                </Box>
+                            </Box>
+                        </Stack>
                     </Box>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={closeAutoFillDialog}>Отмена</Button>
+                <DialogActions 
+                    sx={{ 
+                        borderTop: '1px solid #e0e0e0', 
+                        p: 2.5,
+                        gap: 1,
+                        backgroundColor: '#f8f9fa'
+                    }}
+                >
+                    <Button 
+                        onClick={closeAutoFillDialog}
+                        sx={{ 
+                            textTransform: 'none',
+                            borderRadius: 2,
+                            px: 3
+                        }}
+                    >
+                        Отмена
+                    </Button>
                     <Button 
                         onClick={saveAutoFillSchedule} 
                         variant="contained" 
                         color="primary"
                         disabled={autoFillDialog.employees.length === 0}
+                        startIcon={<Schedule />}
+                        sx={{ 
+                            textTransform: 'none',
+                            borderRadius: 2,
+                            px: 3,
+                            backgroundColor: '#1976d2',
+                            boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)',
+                            '&:hover': {
+                                backgroundColor: '#1565c0',
+                                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.35)'
+                            }
+                        }}
                     >
                         Сгенерировать график
                     </Button>

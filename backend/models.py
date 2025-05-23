@@ -110,6 +110,10 @@ class AppointmentServicePivot(Base):
     service_id = Column(Integer, ForeignKey('services.id'), primary_key=True)
     appointment_id = Column(Integer, ForeignKey('appointments.id'), primary_key=True)
 
+    def __init__(self, service_id=None, appointment_id=None):
+        self.service_id = service_id
+        self.appointment_id = appointment_id
+
 class AppointmentComplexPivot(Base):
     __tablename__ = 'appointment_complex_pivot'
     complex_id = Column(Integer, ForeignKey('service_complexes.id'), primary_key=True)
@@ -189,6 +193,7 @@ class Appointment(Base):
     service_id = Column(Integer, ForeignKey('services.id'))
     complex_id = Column(Integer, ForeignKey('service_complexes.id'), nullable=True)
     datetime = Column(DateTime)
+    custom_duration = Column(Integer, nullable=True)
     is_completed = Column(Boolean, default=False)
     is_paid = Column(Boolean, default=False)
     notes = Column(Text)
@@ -225,5 +230,7 @@ class EmployeeWorkload(Base):
     __tablename__ = 'employee_workload'
     schedule_id = Column(Integer, ForeignKey('schedules.id'), primary_key=True)
     booked_slots = Column(Integer)
+    total_slots = Column(Integer)
+    workload_percent = Column(Float)
     
     schedule = relationship("Schedule", back_populates="workload")
