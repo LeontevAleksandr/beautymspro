@@ -139,6 +139,7 @@ class Employee(Base):
     phone = Column(String, unique=True, index=True, nullable=True)
     email = Column(String, unique=True, index=True, nullable=True)
     password = Column(String(255))
+    telegram_chat_id = Column(BigInteger, unique=True, nullable=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     

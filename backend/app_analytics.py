@@ -22,7 +22,7 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import logging
 from flask_cors import CORS
 
-from sqlalchemy import func, extract, case, and_, or_, desc, distinct, text, Integer
+from sqlalchemy import func, extract, case, and_, or_, desc, distinct, text, Integer, Numeric
 from sqlalchemy.sql import label
 
 def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Employee, Schedule, EmployeeWorkload, Appointment):
@@ -211,7 +211,7 @@ def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Emp
     @app.route('/api/analytics/employee_workload', methods=['GET'])
     def analytics_employee_workload():
         """
-        Получение данных о загруженности сотрудников
+        Получение данных о загруженности сотрудников с учетом реальной продолжительности процедур
         Параметры запроса:
         - start_date: начальная дата (YYYY-MM-DD)
         - end_date: конечная дата (YYYY-MM-DD)
@@ -231,52 +231,64 @@ def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Emp
             start_date_obj = date.fromisoformat(start_date)
             end_date_obj = date.fromisoformat(end_date)
             
-            # Базовый запрос - изменен для получения данных напрямую из расписаний и записей
-            query = session.query(
+            # Запрос для получения общего рабочего времени сотрудников
+            schedule_query = session.query(
                 Employee.id,
                 Employee.full_name,
                 Schedule.date,
-                # Подсчитываем количество записей для каждого сотрудника на эту дату
-                func.count(distinct(case(
-                    (and_(
-                        Appointment.employee_id == Employee.id,
-                        func.date(Appointment.datetime) == Schedule.date,
-                        Appointment.status != 'cancelled'
-                    ), Appointment.id),
-                    else_=None
-                ))).label('booked_slots'),
-                # Вычисляем общее количество слотов на основе времени начала и окончания
+                # Вычисляем общее рабочее время в часах (с плавающей точкой)
                 func.cast(
-                    (extract('epoch', Schedule.end_time) - extract('epoch', Schedule.start_time)) / 3600,
-                    Integer
-                ).label('total_slots')
+                    (extract('epoch', Schedule.end_time) - extract('epoch', Schedule.start_time)) / 3600.0,
+                    Numeric(10, 2)  # Исправлено: убрали func.
+                ).label('total_hours')
             ).join(
                 Schedule, 
                 Employee.id == Schedule.employee_id
-            ).outerjoin(
-                Appointment,
-                and_(
-                    Appointment.employee_id == Employee.id,
-                    func.date(Appointment.datetime) == Schedule.date
-                )
             ).filter(
                 Schedule.date >= start_date_obj,
                 Schedule.date <= end_date_obj
-            ).group_by(
-                Employee.id,
-                Employee.full_name,
-                Schedule.date,
-                Schedule.start_time,
-                Schedule.end_time
             )
             
-            # Выполняем запрос
-            results = query.all()
+            # Запрос для получения занятого времени с учетом пользовательской продолжительности
+            appointments_query = session.query(
+                Employee.id.label('emp_id'),
+                func.date(Appointment.datetime).label('app_date'),
+                # Используем custom_duration если есть, иначе duration из Service
+                func.sum(
+                    func.coalesce(
+                        func.cast(Appointment.custom_duration, Numeric(10, 2)) / 60.0,  # Исправлено: убрали func.
+                        func.cast(Service.duration, Numeric(10, 2)) / 60.0  # Исправлено: убрали func.
+                    )
+                ).label('booked_hours')
+            ).join(
+                Service,
+                Appointment.service_id == Service.id
+            ).join(
+                Employee,
+                Appointment.employee_id == Employee.id
+            ).filter(
+                func.date(Appointment.datetime) >= start_date_obj,
+                func.date(Appointment.datetime) <= end_date_obj,
+                Appointment.status != 'cancelled'
+            ).group_by(
+                Employee.id,
+                func.date(Appointment.datetime)
+            )
+            
+            # Выполняем запросы
+            schedule_results = schedule_query.all()
+            appointments_results = appointments_query.all()
+            
+            # Создаем словарь для быстрого поиска занятых часов
+            booked_hours_dict = {}
+            for emp_id, app_date, booked_hours in appointments_results:
+                key = (emp_id, app_date)
+                booked_hours_dict[key] = float(booked_hours) if booked_hours else 0.0
             
             # Группируем данные по сотрудникам и периодам
             employees_data = {}
             
-            for emp_id, emp_name, schedule_date, booked_slots, total_slots in results:
+            for emp_id, emp_name, schedule_date, total_hours in schedule_results:
                 if emp_id not in employees_data:
                     employees_data[emp_id] = {
                         'employee_id': emp_id,
@@ -288,11 +300,13 @@ def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Emp
                 if group_by == 'day':
                     period = schedule_date.isoformat()
                 elif group_by == 'week':
-                    # Получаем номер недели и год
                     year, week, _ = schedule_date.isocalendar()
                     period = f"{year}-W{week:02d}"
                 elif group_by == 'month':
                     period = schedule_date.strftime('%Y-%m')
+                
+                # Получаем занятые часы для этого сотрудника и даты
+                booked_hours = booked_hours_dict.get((emp_id, schedule_date), 0.0)
                 
                 # Ищем существующий период или создаем новый
                 period_data = next((p for p in employees_data[emp_id]['workload'] if p['period'] == period), None)
@@ -300,18 +314,21 @@ def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Emp
                 if period_data is None:
                     period_data = {
                         'period': period,
-                        'booked_slots': 0,
-                        'total_slots': 0
+                        'booked_hours': 0.0,
+                        'total_hours': 0.0
                     }
                     employees_data[emp_id]['workload'].append(period_data)
                 
-                period_data['booked_slots'] += booked_slots
-                period_data['total_slots'] += total_slots
+                period_data['booked_hours'] += booked_hours
+                period_data['total_hours'] += float(total_hours)
             
             # Вычисляем процент загруженности для каждого периода
             for emp_data in employees_data.values():
                 for period in emp_data['workload']:
-                    period['workload_percent'] = round(period['booked_slots'] / period['total_slots'] * 100, 2) if period['total_slots'] > 0 else 0
+                    if period['total_hours'] > 0:
+                        period['workload_percent'] = round((period['booked_hours'] / period['total_hours']) * 100, 2)
+                    else:
+                        period['workload_percent'] = 0.0
             
             # Формируем ответ
             response = {
@@ -330,7 +347,7 @@ def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Emp
     @app.route('/api/analytics/employee_workload_by_weekday', methods=['GET'])
     def analytics_employee_workload_by_weekday():
         """
-        Анализ загруженности сотрудников по дням недели
+        Анализ загруженности сотрудников по дням недели с учетом реальной продолжительности
         Параметры запроса:
         - start_date: начальная дата (YYYY-MM-DD)
         - end_date: конечная дата (YYYY-MM-DD)
@@ -346,46 +363,82 @@ def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Emp
             if not all([start_date, end_date]):
                 return jsonify({'error': 'Необходимо указать начальную и конечную даты'}), 400
             
-            # Базовый запрос
-            query = session.query(
+            start_date_obj = date.fromisoformat(start_date)
+            end_date_obj = date.fromisoformat(end_date)
+            
+            # Запрос для общего рабочего времени по дням недели
+            schedule_query = session.query(
                 Employee.id,
                 Employee.full_name,
                 extract('dow', Schedule.date).label('weekday'),
-                func.sum(EmployeeWorkload.booked_slots).label('booked_slots'),
-                func.sum(EmployeeWorkload.total_slots).label('total_slots')
-            ).join(
-                Schedule, 
-                EmployeeWorkload.schedule_id == Schedule.id
+                func.sum(
+                    func.cast(
+                        (extract('epoch', Schedule.end_time) - extract('epoch', Schedule.start_time)) / 3600.0,
+                        Numeric(10, 2)  # Исправлено: убрали func.
+                    )
+                ).label('total_hours')
             ).join(
                 Employee,
                 Schedule.employee_id == Employee.id
             ).filter(
-                Schedule.date >= date.fromisoformat(start_date),
-                Schedule.date <= date.fromisoformat(end_date)
+                Schedule.date >= start_date_obj,
+                Schedule.date <= end_date_obj
             )
             
-            # Фильтруем по сотруднику, если указан
             if employee_id:
-                query = query.filter(Employee.id == employee_id)
+                schedule_query = schedule_query.filter(Employee.id == employee_id)
             
-            # Группируем по сотруднику и дню недели
-            query = query.group_by(
+            schedule_query = schedule_query.group_by(
                 Employee.id,
                 Employee.full_name,
                 'weekday'
-            ).order_by(
+            )
+            
+            # Запрос для занятого времени по дням недели
+            appointments_query = session.query(
+                Employee.id.label('emp_id'),
+                extract('dow', func.date(Appointment.datetime)).label('weekday'),
+                func.sum(
+                    func.coalesce(
+                        func.cast(Appointment.custom_duration, Numeric(10, 2)) / 60.0,  # Исправлено: убрали func.
+                        func.cast(Service.duration, Numeric(10, 2)) / 60.0  # Исправлено: убрали func.
+                    )
+                ).label('booked_hours')
+            ).join(
+                Service,
+                Appointment.service_id == Service.id
+            ).join(
+                Employee,
+                Appointment.employee_id == Employee.id
+            ).filter(
+                func.date(Appointment.datetime) >= start_date_obj,
+                func.date(Appointment.datetime) <= end_date_obj,
+                Appointment.status != 'cancelled'
+            )
+            
+            if employee_id:
+                appointments_query = appointments_query.filter(Employee.id == employee_id)
+            
+            appointments_query = appointments_query.group_by(
                 Employee.id,
                 'weekday'
             )
             
-            results = query.all()
+            # Выполняем запросы
+            schedule_results = schedule_query.all()
+            appointments_results = appointments_query.all()
+            
+            # Создаем словарь для занятых часов
+            booked_hours_dict = {}
+            for emp_id, weekday, booked_hours in appointments_results:
+                key = (emp_id, int(weekday))
+                booked_hours_dict[key] = float(booked_hours) if booked_hours else 0.0
             
             # Группируем данные по сотрудникам
             employees_data = {}
-            
             weekday_names = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
             
-            for emp_id, emp_name, weekday, booked_slots, total_slots in results:
+            for emp_id, emp_name, weekday, total_hours in schedule_results:
                 if emp_id not in employees_data:
                     employees_data[emp_id] = {
                         'employee_id': emp_id,
@@ -393,13 +446,17 @@ def register_analytics_routes(app, SessionLocal, Service, ServicePopularity, Emp
                         'weekdays': []
                     }
                 
-                workload_percent = round(booked_slots / total_slots * 100, 2) if total_slots > 0 else 0
+                weekday_int = int(weekday)
+                booked_hours = booked_hours_dict.get((emp_id, weekday_int), 0.0)
+                total_hours_float = float(total_hours)
+                
+                workload_percent = round((booked_hours / total_hours_float) * 100, 2) if total_hours_float > 0 else 0.0
                 
                 employees_data[emp_id]['weekdays'].append({
-                    'weekday': int(weekday),
-                    'weekday_name': weekday_names[int(weekday)],
-                    'booked_slots': int(booked_slots),
-                    'total_slots': int(total_slots),
+                    'weekday': weekday_int,
+                    'weekday_name': weekday_names[weekday_int],
+                    'booked_hours': booked_hours,
+                    'total_hours': total_hours_float,
                     'workload_percent': workload_percent
                 })
             

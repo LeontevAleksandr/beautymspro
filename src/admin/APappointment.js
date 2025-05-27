@@ -2,12 +2,13 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Typography, Box, Button, TextField, TableContainer, 
     Paper, Table, TableHead, TableRow, TableCell, TableBody, Select, MenuItem, 
     FormControl, InputLabel, Dialog, DialogActions, DialogContent, DialogTitle, 
-    FormControlLabel, Checkbox, IconButton, Snackbar, Alert, Divider, Stack} from '@mui/material';
+    FormControlLabel, Checkbox, IconButton, Snackbar, Alert, Divider, Stack, 
+    Chip, LinearProgress, Tooltip, Card, CardContent} from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { ru } from 'date-fns/locale';
-import { format, addMinutes, isWithinInterval } from 'date-fns';
+import { format, addMinutes, isWithinInterval, addDays, differenceInDays } from 'date-fns';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
@@ -16,6 +17,16 @@ import TodayIcon from '@mui/icons-material/Today';
 import EditIcon from '@mui/icons-material/Edit';
 import PersonIcon from '@mui/icons-material/Person';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import StarIcon from '@mui/icons-material/Star';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
+import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
+import ErrorIcon from '@mui/icons-material/Error';
 
 // ==================== КОНСТАНТЫ ====================
 const STATUS_COLORS = {
@@ -30,6 +41,21 @@ const STATUS_LABELS = {
     confirmed: 'Подтверждена', 
     completed: 'Завершена',
     cancelled: 'Отменена'
+};
+
+const TIME_PREFERENCES = {
+    morning: { label: 'Утро (8:00-12:00)', start: '08:00', end: '12:00' },
+    afternoon: { label: 'День (12:00-16:00)', start: '12:00', end: '16:00' },
+    evening: { label: 'Вечер (16:00-20:00)', start: '16:00', end: '20:00' },
+    any: { label: 'Любое время', start: '00:00', end: '23:59' }
+};
+
+const REMINDER_OPTIONS = {
+    '': 'Не напоминать',
+    '30': 'За 30 минут',
+    '60': 'За 1 час',
+    '120': 'За 2 часа',
+    '1440': 'За 1 день'
 };
 
 const SLOT_DURATION = 15; // минут
@@ -47,7 +73,17 @@ const INITIAL_RECORD_STATE = {
     is_paid: false,
     notes: '',
     custom_duration: '',
-    final_price: ''
+    final_price: '',
+    reminder_time: ''
+};
+
+const INITIAL_SMART_SEARCH = {
+    startDate: new Date(),
+    endDate: addDays(new Date(), 7),
+    serviceId: '',
+    preferredEmployeeId: '',
+    timePreference: 'any',
+    maxResults: 10
 };
 
 // ==================== УТИЛИТАРНЫЕ ФУНКЦИИ ====================
@@ -60,6 +96,53 @@ const calculateDuration = (startTime, endTime) =>
 const calculateSlotsCount = (duration) => 
     Math.ceil(duration / SLOT_DURATION);
 
+// Функция для расчета оптимальности слота
+const calculateSlotOptimality = (slot, preferences, employeeWorkload) => {
+    let score = 100; // Максимальный балл
+    
+    // 1. Штраф за удаленность от предпочитаемого времени
+    if (preferences.timePreference !== 'any') {
+        const timePrefs = TIME_PREFERENCES[preferences.timePreference];
+        const slotTime = slot.start_time;
+        
+        if (slotTime < timePrefs.start || slotTime > timePrefs.end) {
+            const distance = Math.min(
+                Math.abs(parseInt(slotTime.replace(':', '')) - parseInt(timePrefs.start.replace(':', ''))),
+                Math.abs(parseInt(slotTime.replace(':', '')) - parseInt(timePrefs.end.replace(':', '')))
+            );
+            score -= distance / 100 * 20; // Максимальный штраф 20 баллов
+        }
+    }
+    
+    // 2. Штраф за удаленность от текущей даты
+    const daysDiff = differenceInDays(new Date(slot.date), new Date());
+    score -= daysDiff * 2; // 2 балла за каждый день в будущем
+    
+    // 3. Бонус/штраф за загруженность мастера
+    const employeeWorkloadData = employeeWorkload.find(w => 
+        w.employee_id === slot.employee_id && w.period === slot.date
+    );
+    const workload = employeeWorkloadData ? employeeWorkloadData.workload_percent : 50;
+    
+    if (workload < 30) score += 15; // Бонус за низкую загрузку
+    else if (workload > 80) score -= 15; // Штраф за высокую загрузку
+    
+    // 4. Бонус за предпочитаемого мастера
+    if (preferences.preferredEmployeeId && slot.employee_id === preferences.preferredEmployeeId) {
+        score += 25;
+    }
+    
+    return Math.max(0, Math.min(100, score));
+};
+
+// Функция для расчета изменения загруженности
+const calculateWorkloadChange = (currentWorkload, serviceDuration) => {
+    // Предполагаем 8-часовой рабочий день (480 минут)
+    const dailyWorkMinutes = 480;
+    const additionalPercent = (serviceDuration / dailyWorkMinutes) * 100;
+    return currentWorkload + additionalPercent;
+};
+
 function APappointment({ records, clients, setClients, employees, services }) {
     
     // ==================== СОСТОЯНИЯ ====================
@@ -68,12 +151,14 @@ function APappointment({ records, clients, setClients, employees, services }) {
     const [schedules, setSchedules] = useState([]);
     const [timeSlots, setTimeSlots] = useState([]);
     const [appointments, setAppointments] = useState([]);
+    const [notifications, setNotifications] = useState([]);
     const [filteredEmployees, setFilteredEmployees] = useState([]);
     const [scheduleExceptions, setScheduleExceptions] = useState([]);
 
     // Состояния диалогов
     const [openDialog, setOpenDialog] = useState(false);
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+    const [openSmartDialog, setOpenSmartDialog] = useState(false);
     const [editMode, setEditMode] = useState(false);
     
     // Состояния записей
@@ -87,6 +172,13 @@ function APappointment({ records, clients, setClients, employees, services }) {
     const [availableEmployees, setAvailableEmployees] = useState([]);
     const [serviceQualifications, setServiceQualifications] = useState([]);
     const [servicePrice, setServicePrice] = useState(null);
+    
+    // Состояния умного поиска
+    const [smartSearch, setSmartSearch] = useState(INITIAL_SMART_SEARCH);
+    const [smartResults, setSmartResults] = useState([]);
+    const [employeeWorkload, setEmployeeWorkload] = useState([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [selectedSlot, setSelectedSlot] = useState(null);
     
     // Состояния UI и ошибок (для визуализации ответов от бэкенда)
     const [hoveredCell, setHoveredCell] = useState(null);
@@ -103,6 +195,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
         fetchSchedulesForDate(selectedDate);
         fetchAppointmentsForDate(selectedDate);
         fetchScheduleExceptions();
+        fetchNotifications();
     }, [selectedDate]);
 
     // ДОБАВЛЕНО: пересчитываем размеры блоков после загрузки записей
@@ -175,9 +268,26 @@ function APappointment({ records, clients, setClients, employees, services }) {
                     appointment.datetime && appointment.datetime.startsWith(formattedDate)
                 );
                 setAppointments(filteredAppointments);
+                
+                // Загружаем уведомления для найденных записей
+                if (filteredAppointments.length > 0) {
+                    fetchNotifications();
+                }
             }
         } catch (error) {
             console.error('Ошибка при загрузке записей:', error);
+        }
+    }, []);
+
+    const fetchNotifications = useCallback(async () => {
+        try {
+            const response = await fetch('http://localhost:5000/api/notifications');
+            if (response.ok) {
+                const data = await response.json();
+                setNotifications(data);
+            }
+        } catch (error) {
+            console.error('Ошибка при загрузке уведомлений:', error);
         }
     }, []);
 
@@ -194,6 +304,228 @@ function APappointment({ records, clients, setClients, employees, services }) {
             console.error('Ошибка при получении квалификаций услуги:', error);
         }
         return [];
+    }, []);
+
+    // ==================== ФУНКЦИИ НАПОМИНАНИЙ ====================
+    const createNotification = useCallback(async (appointmentId, appointmentDateTime, reminderMinutes) => {
+        try {
+            const appointmentDate = new Date(appointmentDateTime);
+            const scheduledAt = new Date(appointmentDate.getTime() - (reminderMinutes * 60 * 1000));
+            
+            const notificationData = {
+                appointment_id: appointmentId,
+                scheduled_at: scheduledAt.toISOString(),
+                status: 'scheduled',
+                attempts: 0,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+
+            const response = await fetch('http://localhost:5000/api/notifications', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(notificationData)
+            });
+
+            if (!response.ok) {
+                console.error('Ошибка при создании напоминания:', await response.text());
+            }
+        } catch (error) {
+            console.error('Ошибка при создании напоминания:', error);
+        }
+    }, []);
+
+    // ==================== ФУНКЦИИ УМНОГО ПОИСКА ====================
+    const fetchEmployeeWorkload = useCallback(async (startDate, endDate) => {
+        try {
+            const response = await fetch(
+                `http://localhost:5000/api/analytics/employee_workload?start_date=${format(startDate, 'yyyy-MM-dd')}&end_date=${format(endDate, 'yyyy-MM-dd')}&group_by=day`
+            );
+            if (response.ok) {
+                const data = await response.json();
+                // Преобразуем в плоский массив для удобства
+                const flatWorkload = [];
+                data.employees.forEach(emp => {
+                    emp.workload.forEach(w => {
+                        flatWorkload.push({
+                            employee_id: emp.employee_id,
+                            employee_name: emp.employee_name,
+                            period: w.period,
+                            workload_percent: w.workload_percent,
+                            booked_hours: w.booked_hours,
+                            total_hours: w.total_hours
+                        });
+                    });
+                });
+                return flatWorkload;
+            }
+        } catch (error) {
+            console.error('Ошибка при загрузке данных загруженности:', error);
+        }
+        return [];
+    }, []);
+
+    const fetchAvailableSlots = useCallback(async (employeeId, date, serviceId) => {
+        try {
+            const response = await fetch(
+                `http://localhost:5000/api/available_slots?employee_id=${employeeId}&date=${format(date, 'yyyy-MM-dd')}&service_id=${serviceId}`
+            );
+            if (response.ok) {
+                const data = await response.json();
+                // Возвращаем массив слотов в правильном формате
+                return data.available_slots || [];
+            }
+        } catch (error) {
+            console.error('Ошибка при загрузке доступных слотов:', error);
+        }
+        return [];
+    }, []);
+
+    const performSmartSearch = useCallback(async () => {
+        if (!smartSearch.serviceId) {
+            setServerError('Выберите услугу для поиска');
+            return;
+        }
+
+        setIsSearching(true);
+        setServerError(null);
+
+        try {
+            console.log('Начинаем умный поиск...', smartSearch);
+
+            // Получаем данные о загруженности
+            const workload = await fetchEmployeeWorkload(smartSearch.startDate, smartSearch.endDate);
+            setEmployeeWorkload(workload);
+            console.log('Загруженность сотрудников:', workload);
+
+            // Определяем мастеров для поиска
+            const service = services.find(s => s.id === parseInt(smartSearch.serviceId));
+            if (!service) {
+                setServerError('Услуга не найдена');
+                return;
+            }
+
+            console.log('Выбранная услуга:', service);
+
+            const qualifications = await fetchServiceQualifications(smartSearch.serviceId);
+            const suitableEmployees = employees.filter(emp => {
+                if (emp.specialization_id !== service.specialization_id) return false;
+                return qualifications.some(q => 
+                    q.qualification_id === emp.qualification_level_id && q.is_allowed
+                );
+            });
+
+            console.log('Подходящие мастера:', suitableEmployees);
+
+            if (suitableEmployees.length === 0) {
+                setServerError('Не найдены мастера для выбранной услуги');
+                return;
+            }
+
+            // Фильтруем мастеров по предпочтениям
+            const employeesToSearch = smartSearch.preferredEmployeeId 
+                ? suitableEmployees.filter(emp => emp.id === parseInt(smartSearch.preferredEmployeeId))
+                : suitableEmployees;
+
+            console.log('Мастера для поиска:', employeesToSearch);
+
+            // Собираем все доступные слоты
+            const allSlots = [];
+            const currentDate = new Date(smartSearch.startDate);
+            const endDate = new Date(smartSearch.endDate);
+
+            while (currentDate <= endDate) {
+                const dateString = format(currentDate, 'yyyy-MM-dd');
+                
+                for (const employee of employeesToSearch) {
+                    try {
+                        const slots = await fetchAvailableSlots(employee.id, currentDate, smartSearch.serviceId);
+                        console.log(`Слоты для ${employee.full_name} на ${dateString}:`, slots);
+                        
+                        slots.forEach(slot => {
+                            allSlots.push({
+                                date: dateString,
+                                start_time: slot.start,
+                                end_time: slot.end,
+                                duration: slot.duration,
+                                employee_id: employee.id,
+                                employee_name: employee.full_name,
+                                service_id: smartSearch.serviceId,
+                                service_name: service.name,
+                                price: service.base_price
+                            });
+                        });
+                    } catch (error) {
+                        console.error(`Ошибка при загрузке слотов для ${employee.full_name}:`, error);
+                    }
+                }
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            console.log('Все найденные слоты:', allSlots);
+
+            if (allSlots.length === 0) {
+                setServerError('Не найдено доступных временных слотов в указанный период');
+                setSmartResults([]);
+                return;
+            }
+
+            // Рассчитываем оптимальность и сортируем
+            const slotsWithScore = allSlots.map(slot => ({
+                ...slot,
+                optimality: calculateSlotOptimality(slot, smartSearch, workload)
+            }));
+
+            slotsWithScore.sort((a, b) => b.optimality - a.optimality);
+
+            const limitedResults = slotsWithScore.slice(0, smartSearch.maxResults);
+            setSmartResults(limitedResults);
+            console.log('Результаты с оценками:', limitedResults);
+
+            if (limitedResults.length === 0) {
+                setServerError('Не найдено подходящих слотов с учетом ваших предпочтений');
+            }
+
+        } catch (error) {
+            console.error('Ошибка при выполнении умного поиска:', error);
+            setServerError('Ошибка при поиске оптимального времени: ' + error.message);
+        } finally {
+            setIsSearching(false);
+        }
+    }, [smartSearch, services, employees, fetchEmployeeWorkload, fetchServiceQualifications, fetchAvailableSlots]);
+
+    const handleSlotSelect = useCallback((slot) => {
+        setSelectedSlot(slot);
+        
+        // Автозаполнение формы записи
+        setNewRecord({
+            ...INITIAL_RECORD_STATE,
+            service_id: slot.service_id,
+            employee_id: slot.employee_id,
+            date: slot.date,
+            time: slot.start_time,
+            final_price: slot.price,
+            reminder_time: '' // Сбрасываем напоминание при автоподборе
+        });
+
+        // Устанавливаем доступных мастеров (только выбранного)
+        const selectedEmployee = employees.find(emp => emp.id === slot.employee_id);
+        if (selectedEmployee) {
+            setAvailableEmployees([selectedEmployee]);
+        }
+
+        setServicePrice(slot.price);
+        setOpenSmartDialog(false);
+        
+        showSnackbar('Слот выбран! Заполните данные клиента для завершения записи.', 'success');
+    }, [employees]);
+
+    const resetSmartSearch = useCallback(() => {
+        setSmartSearch(INITIAL_SMART_SEARCH);
+        setSmartResults([]);
+        setEmployeeWorkload([]);
+        setSelectedSlot(null);
+        setServerError(null);
     }, []);
 
     // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
@@ -295,6 +627,23 @@ function APappointment({ records, clients, setClients, employees, services }) {
         return service ? service.name : 'Неизвестная услуга';
     }, [services]);
 
+    const getNotificationForAppointment = useCallback((appointmentId) => {
+        return notifications.find(n => n.appointment_id === appointmentId);
+    }, [notifications]);
+
+    const getNotificationIcon = useCallback((status) => {
+        switch (status) {
+            case 'scheduled':
+                return <NotificationsIcon sx={{ fontSize: 10, color: '#ff9800' }} />;
+            case 'sent':
+                return <NotificationsActiveIcon sx={{ fontSize: 10, color: '#4caf50' }} />;
+            case 'failed':
+                return <ErrorIcon sx={{ fontSize: 10, color: '#f44336' }} />;
+            default:
+                return <NotificationsOffIcon sx={{ fontSize: 10, color: '#9e9e9e' }} />;
+        }
+    }, []);
+
     const showSnackbar = useCallback((message, severity = 'info') => {
         setSnackbar({ open: true, message, severity });
     }, []);
@@ -309,6 +658,95 @@ function APappointment({ records, clients, setClients, employees, services }) {
         setServicePrice(null);
         setAddNewClient(false);
         setNewClient({ full_name: '', phone: '', email: '' });
+    }, []);
+
+    // ==================== КОМПОНЕНТЫ ВИЗУАЛИЗАЦИИ ====================
+    const renderWorkloadBar = useCallback((workloadBefore, workloadAfter, employeeName) => {
+        const hasChange = workloadAfter !== undefined && workloadAfter !== workloadBefore;
+        
+        return (
+            <Box sx={{ width: '100%', minWidth: 120 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                    <Typography variant="caption" sx={{ mr: 1, minWidth: '45px' }}>
+                        {hasChange ? 'До:' : 'Загрузка:'}
+                    </Typography>
+                    <Box sx={{ flex: 1, mr: 1 }}>
+                        <LinearProgress 
+                            variant="determinate" 
+                            value={Math.min(workloadBefore, 100)} 
+                            sx={{ 
+                                height: 6, 
+                                borderRadius: 3,
+                                backgroundColor: '#f0f0f0',
+                                '& .MuiLinearProgress-bar': {
+                                    backgroundColor: workloadBefore > 80 ? '#f44336' : 
+                                                   workloadBefore > 60 ? '#ff9800' : '#4caf50'
+                                }
+                            }}
+                        />
+                    </Box>
+                    <Typography variant="caption" sx={{ minWidth: '30px', fontWeight: 500 }}>
+                        {Math.round(workloadBefore)}%
+                    </Typography>
+                </Box>
+                
+                {hasChange && (
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ mr: 1, minWidth: '45px' }}>
+                            После:
+                        </Typography>
+                        <Box sx={{ flex: 1, mr: 1 }}>
+                            <LinearProgress 
+                                variant="determinate" 
+                                value={Math.min(workloadAfter, 100)} 
+                                sx={{ 
+                                    height: 6, 
+                                    borderRadius: 3,
+                                    backgroundColor: '#f0f0f0',
+                                    '& .MuiLinearProgress-bar': {
+                                        backgroundColor: workloadAfter > 80 ? '#f44336' : 
+                                                       workloadAfter > 60 ? '#ff9800' : '#4caf50'
+                                    }
+                                }}
+                            />
+                        </Box>
+                        <Typography variant="caption" sx={{ minWidth: '30px', fontWeight: 500 }}>
+                            {Math.round(workloadAfter)}%
+                        </Typography>
+                        {workloadAfter > workloadBefore ? (
+                            <TrendingUpIcon sx={{ fontSize: 14, color: 'error.main', ml: 0.5 }} />
+                        ) : (
+                            <TrendingDownIcon sx={{ fontSize: 14, color: 'success.main', ml: 0.5 }} />
+                        )}
+                    </Box>
+                )}
+            </Box>
+        );
+    }, []);
+
+    const renderOptimalityChip = useCallback((optimality) => {
+        const getColor = (score) => {
+            if (score >= 80) return 'success';
+            if (score >= 60) return 'warning';
+            return 'error';
+        };
+
+        const getLabel = (score) => {
+            if (score >= 80) return 'Отлично';
+            if (score >= 60) return 'Хорошо';
+            return 'Удовлетворительно';
+        };
+
+        return (
+            <Chip
+                size="small"
+                label={`${Math.round(optimality)}% • ${getLabel(optimality)}`}
+                color={getColor(optimality)}
+                variant="outlined"
+                icon={optimality >= 80 ? <StarIcon /> : undefined}
+                sx={{ fontWeight: 500 }}
+            />
+        );
     }, []);
 
     // ==================== ОБРАБОТЧИКИ УДАЛЕНИЯ ====================
@@ -584,7 +1022,8 @@ function APappointment({ records, clients, setClients, employees, services }) {
             is_paid: appointment.is_paid,
             notes: appointment.notes || '',
             custom_duration: appointment.custom_duration || '',
-            final_price: appointment.final_price || ''
+            final_price: appointment.final_price || '',
+            reminder_time: '' // Не показываем напоминания при редактировании
         });
         
         const selectedEmployee = employees.find(emp => emp.id === appointment.employee_id);
@@ -659,8 +1098,20 @@ function APappointment({ records, clients, setClients, employees, services }) {
             }
             
             // Успешное создание/обновление
+            const createdAppointment = data;
+            
+            // Создаем напоминание, если выбрано
+            if (!editMode && newRecord.reminder_time && createdAppointment.id) {
+                await createNotification(
+                    createdAppointment.id, 
+                    appointmentData.datetime, 
+                    parseInt(newRecord.reminder_time)
+                );
+            }
+            
             setOpenDialog(false);
             fetchAppointmentsForDate(selectedDate);
+            fetchNotifications(); // Перезагружаем уведомления
             showSnackbar(editMode ? 'Запись успешно обновлена' : 'Запись успешно создана', 'success');
             resetForm();
         } catch (error) {
@@ -704,6 +1155,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                 setAppointments(appointments.filter(app => app.id !== appointmentToDelete.id));
                 setOpenDeleteDialog(false);
                 setAppointmentToDelete(null);
+                fetchNotifications(); // Перезагружаем уведомления
                 showSnackbar('Запись успешно удалена', 'success');
             } else {
                 showSnackbar('Ошибка при удалении записи', 'error');
@@ -874,6 +1326,34 @@ function APappointment({ records, clients, setClients, employees, services }) {
                             <AccessTimeIcon sx={{ fontSize: '10px', mr: 0.5 }} />
                             {format(appointmentTime, 'HH:mm')} - {appointmentEndTimeStr}
                         </Typography>
+                        
+                        {/* Информация о напоминании */}
+                        {(() => {
+                            const notification = getNotificationForAppointment(appointment.id);
+                            if (!notification) return null;
+                            
+                            return (
+                                <Typography 
+                                    variant="caption" 
+                                    noWrap 
+                                    sx={{ 
+                                        fontSize: '0.65rem',
+                                        color: 'text.secondary',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        lineHeight: 1,
+                                        mt: 0.3
+                                    }}
+                                >
+                                    {getNotificationIcon(notification.status)}
+                                    <Box component="span" sx={{ ml: 0.5 }}>
+                                        {notification.status === 'scheduled' && `Напомнить ${format(new Date(notification.scheduled_at), 'dd.MM HH:mm')}`}
+                                        {notification.status === 'sent' && `Отправлено ${format(new Date(notification.sent_at), 'dd.MM HH:mm')}`}
+                                        {notification.status === 'failed' && `Ошибка отправки${notification.attempts > 1 ? ` (${notification.attempts} попыток)` : ''}`}
+                                    </Box>
+                                </Typography>
+                            );
+                        })()}
                         
                         {appointment.final_price && slotsCount > 2 && (
                             <Typography 
@@ -1206,9 +1686,33 @@ function APappointment({ records, clients, setClients, employees, services }) {
                 PaperProps={{ sx: { borderRadius: 2 } }}
             >
                 <DialogTitle sx={{ pb: 1 }}>
-                    <Typography variant="h6" fontWeight={500}>
-                        {editMode ? 'Редактировать запись' : 'Новая запись'}
-                    </Typography>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography variant="h6" fontWeight={500}>
+                            {editMode ? 'Редактировать запись' : 'Новая запись'}
+                        </Typography>
+                        {!editMode && (
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<AutoFixHighIcon />}
+                                onClick={() => {
+                                    setOpenSmartDialog(true);
+                                    resetSmartSearch();
+                                }}
+                                sx={{ 
+                                    textTransform: 'none',
+                                    borderColor: '#1976d2',
+                                    color: '#1976d2',
+                                    '&:hover': {
+                                        backgroundColor: '#e3f2fd',
+                                        borderColor: '#1565c0'
+                                    }
+                                }}
+                            >
+                                Автоподбор времени
+                            </Button>
+                        )}
+                    </Stack>
                 </DialogTitle>
                 
                 <Divider />
@@ -1408,6 +1912,21 @@ function APappointment({ records, clients, setClients, employees, services }) {
                                 />
                             </Stack>
 
+                            {/* Напоминание */}
+                            {!editMode && (
+                                <FormControl fullWidth size="small">
+                                    <InputLabel>Напомнить за</InputLabel>
+                                    <Select
+                                        value={newRecord.reminder_time || ''}
+                                        onChange={e => setNewRecord({ ...newRecord, reminder_time: e.target.value })}
+                                    >
+                                        {Object.entries(REMINDER_OPTIONS).map(([value, label]) => (
+                                            <MenuItem key={value} value={value}>{label}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+                            )}
+
                             {/* Заметки */}
                             <TextField
                                 label="Заметки"
@@ -1466,6 +1985,246 @@ function APappointment({ records, clients, setClients, employees, services }) {
                         </Button>
                     </DialogActions>
                 </form>
+            </Dialog>
+
+            {/* Диалог умного поиска */}
+            <Dialog 
+                open={openSmartDialog} 
+                onClose={() => { setOpenSmartDialog(false); resetSmartSearch(); }} 
+                maxWidth="lg" 
+                fullWidth
+                PaperProps={{ sx: { borderRadius: 2 } }}
+            >
+                <DialogTitle>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <AutoFixHighIcon sx={{ color: '#1976d2' }} />
+                        <Typography variant="h6" fontWeight={500}>
+                            Автоподбор оптимального времени
+                        </Typography>
+                    </Box>
+                </DialogTitle>
+                
+                <Divider />
+                
+                <DialogContent sx={{ pt: 3 }}>
+                    <Stack spacing={3}>
+                        {/* Параметры поиска */}
+                        <Card sx={{ border: '1px solid #e0e0e0', boxShadow: 'none' }}>
+                            <CardContent sx={{ p: 2 }}>
+                                <Typography variant="subtitle2" fontWeight={600} gutterBottom sx={{ mb: 2 }}>
+                                    Параметры поиска
+                                </Typography>
+                                
+                                <Stack spacing={2}>
+                                    {/* Период дат */}
+                                    <Stack direction="row" spacing={2}>
+                                        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
+                                            <DatePicker
+                                                label="Дата от"
+                                                value={smartSearch.startDate}
+                                                onChange={(date) => setSmartSearch(prev => ({ ...prev, startDate: date }))}
+                                                renderInput={(params) => 
+                                                    <TextField {...params} size="small" fullWidth />
+                                                }
+                                            />
+                                            <DatePicker
+                                                label="Дата до"
+                                                value={smartSearch.endDate}
+                                                onChange={(date) => setSmartSearch(prev => ({ ...prev, endDate: date }))}
+                                                renderInput={(params) => 
+                                                    <TextField {...params} size="small" fullWidth />
+                                                }
+                                            />
+                                        </LocalizationProvider>
+                                    </Stack>
+                                    
+                                    {/* Услуга и мастер */}
+                                    <Stack direction="row" spacing={2}>
+                                        <FormControl fullWidth size="small">
+                                            <InputLabel>Услуга *</InputLabel>
+                                            <Select
+                                                value={smartSearch.serviceId || ''}
+                                                onChange={(e) => setSmartSearch(prev => ({ ...prev, serviceId: e.target.value }))}
+                                            >
+                                                {servicesArray.map(service => (
+                                                    <MenuItem key={service.id} value={service.id}>
+                                                        {service.name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                        
+                                        <FormControl fullWidth size="small">
+                                            <InputLabel>Предпочитаемый мастер</InputLabel>
+                                            <Select
+                                                value={smartSearch.preferredEmployeeId || ''}
+                                                onChange={(e) => setSmartSearch(prev => ({ ...prev, preferredEmployeeId: e.target.value }))}
+                                            >
+                                                <MenuItem value="">Любой подходящий</MenuItem>
+                                                {employees.map(emp => (
+                                                    <MenuItem key={emp.id} value={emp.id}>
+                                                        {emp.full_name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                    </Stack>
+                                    
+                                    {/* Время и количество результатов */}
+                                    <Stack direction="row" spacing={2}>
+                                        <FormControl fullWidth size="small">
+                                            <InputLabel>Предпочитаемое время</InputLabel>
+                                            <Select
+                                                value={smartSearch.timePreference}
+                                                onChange={(e) => setSmartSearch(prev => ({ ...prev, timePreference: e.target.value }))}
+                                            >
+                                                {Object.entries(TIME_PREFERENCES).map(([value, pref]) => (
+                                                    <MenuItem key={value} value={value}>{pref.label}</MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                        
+                                        <TextField
+                                            label="Макс. результатов"
+                                            type="number"
+                                            size="small"
+                                            fullWidth
+                                            value={smartSearch.maxResults}
+                                            onChange={(e) => setSmartSearch(prev => ({ ...prev, maxResults: parseInt(e.target.value) || 10 }))}
+                                            inputProps={{ min: 1, max: 50 }}
+                                        />
+                                    </Stack>
+                                </Stack>
+                                
+                                <Box sx={{ mt: 2, textAlign: 'center' }}>
+                                    <Button
+                                        variant="contained"
+                                        onClick={performSmartSearch}
+                                        disabled={isSearching || !smartSearch.serviceId}
+                                        startIcon={isSearching ? <ScheduleIcon /> : <AutoFixHighIcon />}
+                                        sx={{ 
+                                            textTransform: 'none',
+                                            minWidth: 160
+                                        }}
+                                    >
+                                        {isSearching ? 'Поиск...' : 'Найти оптимальное время'}
+                                    </Button>
+                                </Box>
+                            </CardContent>
+                        </Card>
+                        
+                        {/* Результаты поиска */}
+                        {smartResults.length > 0 && (
+                            <Card sx={{ border: '1px solid #e0e0e0', boxShadow: 'none' }}>
+                                <CardContent sx={{ p: 0 }}>
+                                    <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0' }}>
+                                        <Typography variant="subtitle2" fontWeight={600}>
+                                            Найдено {smartResults.length} оптимальных вариантов
+                                        </Typography>
+                                    </Box>
+                                    
+                                    <TableContainer sx={{ maxHeight: 500 }}>
+                                        <Table size="small">
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell sx={{ fontWeight: 600 }}>Дата и время</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600 }}>Мастер</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600, minWidth: 200 }}>Загруженность</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600 }}>Оптимальность</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600 }}>Действие</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {smartResults.map((slot, index) => {
+                                                    const workloadData = employeeWorkload.find(w => 
+                                                        w.employee_id === slot.employee_id && w.period === slot.date
+                                                    );
+                                                    const currentWorkload = workloadData ? workloadData.workload_percent : 0;
+                                                    const estimatedNewWorkload = calculateWorkloadChange(currentWorkload, slot.duration);
+                                                    
+                                                    return (
+                                                        <TableRow 
+                                                            key={index}
+                                                            sx={{ 
+                                                                '&:hover': { 
+                                                                    backgroundColor: '#f5f7fa',
+                                                                    cursor: 'pointer' 
+                                                                }
+                                                            }}
+                                                            onClick={() => handleSlotSelect(slot)}
+                                                        >
+                                                            <TableCell>
+                                                                <Box>
+                                                                    <Typography variant="body2" fontWeight={500}>
+                                                                        {format(new Date(slot.date), 'dd.MM.yyyy', { locale: ru })}
+                                                                    </Typography>
+                                                                    <Typography variant="caption" color="text.secondary">
+                                                                        {slot.start_time} - {slot.end_time}
+                                                                    </Typography>
+                                                                </Box>
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <Typography variant="body2">
+                                                                    {slot.employee_name}
+                                                                </Typography>
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                {renderWorkloadBar(currentWorkload, estimatedNewWorkload, slot.employee_name)}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                {renderOptimalityChip(slot.optimality)}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <Button
+                                                                    size="small"
+                                                                    variant="outlined"
+                                                                    startIcon={<CheckCircleIcon />}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleSlotSelect(slot);
+                                                                    }}
+                                                                    sx={{ textTransform: 'none' }}
+                                                                >
+                                                                    Выбрать
+                                                                </Button>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                </CardContent>
+                            </Card>
+                        )}
+                        
+                        {/* Сообщение об отсутствии результатов */}
+                        {!isSearching && smartResults.length === 0 && smartSearch.serviceId && (
+                            <Alert severity="info">
+                                Не найдено подходящих временных слотов в указанный период. 
+                                Попробуйте расширить диапазон дат или изменить предпочтения.
+                            </Alert>
+                        )}
+                        
+                        {/* Ошибки */}
+                        {serverError && (
+                            <Alert severity="error">
+                                {serverError}
+                            </Alert>
+                        )}
+                    </Stack>
+                </DialogContent>
+                
+                <Divider />
+                
+                <DialogActions sx={{ p: 2 }}>
+                    <Button 
+                        onClick={() => { setOpenSmartDialog(false); resetSmartSearch(); }}
+                        sx={{ textTransform: 'none' }}
+                    >
+                        Закрыть
+                    </Button>
+                </DialogActions>
             </Dialog>
 
             {/* Диалог удаления */}

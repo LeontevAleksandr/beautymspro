@@ -252,7 +252,8 @@ function APemployee() {
             email: employee.email || '',
             password: '',
             specialization_id: employee.specialization_id || '',
-            qualification_level_id: employee.qualification_level_id || ''
+            qualification_level_id: employee.qualification_level_id || '',
+            telegram_chat_id: 'null'
         });
         setFormErrors({
             full_name: false,
