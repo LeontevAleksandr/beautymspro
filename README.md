@@ -1,15 +1,15 @@
 # Инструкции по запуску приложения на локальном сервере
-# 1. Запускаем фронт:
-## npm start
+ 1. Запускаем фронт:
+ npm start
 
 # 2. Создаем новую консоль для полного запуска бекенда:
-## python -m backend.app
+ python -m backend.app
 
 # 3. Создаем еще одну консоль и запускаем клиентского бота:
-## python -m backend.telegram_bot
+ python -m backend.telegram_bot
 
 # 4. И еще раз создаем консоль и запускаем мастерского бота
-## python -m backend.master_bot
+ python -m backend.master_bot
           
 # BeautyMSPro - Система управления салоном красоты
 
