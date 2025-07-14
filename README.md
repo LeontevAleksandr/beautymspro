@@ -1,70 +1,250 @@
-# Getting Started with Create React App
+# Инструкции по запуску приложения на локальном сервере
+ 1. Запускаем фронт:
+ npm start
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+# 2. Создаем новую консоль для полного запуска бекенда:
+ python -m backend.app
 
-## Available Scripts
+# 3. Создаем еще одну консоль и запускаем клиентского бота:
+ python -m backend.telegram_bot
 
-In the project directory, you can run:
+# 4. И еще раз создаем консоль и запускаем мастерского бота
+ python -m backend.master_bot
+          
+# BeautyMSPro - Система управления салоном красоты
 
-### `npm start`
+## Обзор проекта
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+BeautyMSPro - это комплексная система управления салоном красоты, состоящая из следующих компонентов:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- **Веб-интерфейс администратора** - React-приложение для управления всеми аспектами салона
+- **Веб-интерфейс мастера** - React-приложение для мастеров салона
+- **REST API** - Flask-бэкенд для обработки запросов и работы с базой данных
+- **Telegram-бот для клиентов** - для записи на услуги и получения уведомлений
+- **Telegram-бот для мастеров** - для просмотра расписания и управления записями
 
-### `npm test`
+## Технологический стек
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Фронтенд
+- React 18.2.0
+- Material UI 7.1.0
+- React Router 7.6.0
+- Recharts (для аналитики)
+- Date-fns (для работы с датами)
+- React Beautiful DnD (для drag-and-drop интерфейсов)
 
-### `npm run build`
+### Бэкенд
+- Python
+- Flask (веб-фреймворк)
+- SQLAlchemy (ORM)
+- PostgreSQL (база данных)
+- python-telegram-bot (для Telegram-ботов)
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Структура проекта
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```
+beautymspro/
+├── backend/                  # Бэкенд на Flask
+│   ├── __pycache__/          # Кэш Python
+│   ├── venv/                 # Виртуальное окружение Python
+│   ├── .env                  # Переменные окружения
+│   ├── API_instruction.txt   # Документация по API
+│   ├── app.py                # Основной файл Flask-приложения
+│   ├── app_analytics.py      # Модуль аналитики
+│   ├── database.py           # Конфигурация базы данных
+│   ├── master_bot.py         # Telegram-бот для мастеров
+│   ├── models.py             # Модели данных SQLAlchemy
+│   ├── telegram_bot.py       # Telegram-бот для клиентов
+│   └── ДоступныеАПИ.txt      # Список доступных API-эндпоинтов
+├── public/                   # Публичные файлы React
+├── src/                      # Исходный код React
+│   ├── admin/                # Компоненты панели администратора
+│   ├── master/               # Компоненты панели мастера
+│   ├── App.js                # Основной компонент React
+│   └── ...
+├── package.json              # Зависимости npm
+└── README.md                 # Этот файл
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Настройка и запуск
 
-### `npm run eject`
+### Требования
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+- Node.js 16+ и npm
+- Python 3.8+
+- PostgreSQL 12+
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+### Настройка базы данных
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+1. Установите PostgreSQL и создайте пользователя:
+   ```bash
+   # Подключитесь к PostgreSQL
+   psql -U postgres
+   
+   # Создайте базу данных (если не создается автоматически)
+   CREATE DATABASE db_beauty_room_38;
+   ```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+2. Настройте подключение к базе данных в файле `backend/database.py`:
+   ```python
+   DATABASE_URL = "postgresql+psycopg2://postgres:1234@localhost:5432/db_beauty_room_38"
+   ```
 
-## Learn More
+### Настройка бэкенда
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+1. Создайте и активируйте виртуальное окружение Python:
+   ```bash
+   cd backend
+   python -m venv venv
+   venv\Scripts\activate
+   ```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+2. Установите зависимости Python:
+   ```bash
+   pip install flask sqlalchemy psycopg2 python-telegram-bot python-dotenv flask-cors
+   ```
 
-### Code Splitting
+3. Настройте переменные окружения в файле `.env`:
+   ```
+   TELEGRAM_BOT_TOKEN=ваш_токен_бота_для_клиентов
+   MASTER_BOT_TOKEN=ваш_токен_бота_для_мастеров
+   API_BASE_URL=http://localhost:5000
+   ```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+4. Запустите Flask-сервер:
+   ```bash
+   python -m backend.app
+   ```
 
-### Analyzing the Bundle Size
+### Настройка фронтенда
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+1. Установите зависимости npm:
+   ```bash
+   npm install --legacy-peer-deps
+   ```
 
-### Making a Progressive Web App
+2. Запустите React-приложение:
+   ```bash
+   npm start
+   ```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+### Запуск Telegram-ботов
 
-### Advanced Configuration
+1. Запустите бот для клиентов:
+   ```bash
+   python -m backend.telegram_bot
+   ```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+2. Запустите бот для мастеров:
+   ```bash
+   python -m backend.master_bot
+   ```
 
-### Deployment
+## Структура базы данных
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+Система использует следующие основные модели данных:
 
-### `npm run build` fails to minify
+- **Client** - клиенты салона
+- **Employee** - сотрудники (мастера)
+- **Service** - услуги салона
+- **ServiceComplex** - комплексы услуг
+- **Appointment** - записи клиентов
+- **Schedule** - расписание мастеров
+- **Notification** - уведомления о записях
+- **Specialization** - специализации мастеров
+- **Qualification** - уровни квалификации мастеров
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+## API-эндпоинты
+
+Система предоставляет RESTful API для всех сущностей. Основные эндпоинты:
+
+- `/api/clients` - управление клиентами
+- `/api/employees` - управление сотрудниками
+- `/api/services` - управление услугами
+- `/api/appointments` - управление записями
+- `/api/schedules` - управление расписанием
+- `/api/specializations` - управление специализациями
+- `/api/qualifications` - управление квалификациями
+
+Полный список API-эндпоинтов доступен в файле `backend/ДоступныеАПИ.txt`.
+
+## Telegram-боты
+
+### Бот для клиентов
+
+Функциональность:
+- Регистрация клиентов
+- Запись на услуги
+- Выбор мастера, услуги, даты и времени
+- Получение уведомлений о предстоящих записях
+- Просмотр истории записей
+
+### Бот для мастеров
+
+Функциональность:
+- Авторизация мастеров
+- Просмотр расписания на день
+- Управление записями
+- Получение уведомлений о новых записях
+
+## Панель администратора
+
+Панель администратора доступна по адресу `/admin` и предоставляет следующие функции:
+
+- Управление записями клиентов
+- Управление клиентами
+- Управление сотрудниками
+- Управление услугами и комплексами
+- Управление специализациями и квалификациями
+- Аналитика и отчеты
+
+## Панель мастера
+
+Панель мастера доступна по адресу `/master` и предоставляет функции для работы мастеров салона.
+
+## Разработка
+
+### Добавление новых API-эндпоинтов
+
+1. Определите модель в `models.py`
+2. Добавьте маршрут в `app.py`
+3. Обновите документацию в `ДоступныеАПИ.txt`
+
+### Добавление новых компонентов React
+
+1. Создайте новый компонент в директории `src/admin` или `src/master`
+2. Импортируйте компонент в соответствующую панель
+
+## Дополнительная информация
+
+- Система использует PostgreSQL для хранения данных
+- API использует JSON для обмена данными
+- Даты и время хранятся в формате ISO
+- Для аутентификации используются простые механизмы (без JWT)
+
+## Устранение неполадок
+
+### Проблемы с базой данных
+
+Если база данных не создается автоматически, создайте ее вручную:
+
+```bash
+psql -U postgres -c "CREATE DATABASE db_beauty_room_38;"
+```
+
+### Проблемы с Telegram-ботами
+
+Если возникает ошибка `telegram.error.Conflict`, это означает, что бот уже запущен в другом процессе. Остановите все экземпляры бота и запустите заново.
+
+### Проблемы с зависимостями npm
+
+Если возникают конфликты зависимостей, используйте флаг `--legacy-peer-deps`:
+
+```bash
+npm install --legacy-peer-deps
+```
+
+## Лицензия
+
+Внутренний проект, все права защищены.
+        
