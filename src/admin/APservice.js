@@ -6,7 +6,7 @@ import {
   FormControl, InputLabel, Select, MenuItem, Checkbox,
   Stack, Divider
 } from '@mui/material';
-import { Edit, Delete, Add, LocalOffer, Category, Timer, AttachMoney } from '@mui/icons-material';
+import { Edit, Delete, Add, LocalOffer, Category, Timer} from '@mui/icons-material';
 
 const APservice = () => {
   const [services, setServices] = useState([]);
@@ -415,8 +415,8 @@ const APservice = () => {
                   fullWidth
                   required
                   InputProps={{ 
-                    inputProps: { min: 0, step: 50 },
-                    startAdornment: <AttachMoney sx={{ color: '#666', fontSize: 18, mr: 0.5 }} />
+                    inputProps: { min: 0, step: 50 } 
+                    //startAdornment: <AttachMoney sx={{ color: '#666', fontSize: 18, mr: 0.5 }} />
                   }}
                   size="small"
                   sx={{
@@ -711,7 +711,6 @@ const APservice = () => {
                 }}
               >
                 <Stack direction="row" alignItems="center" spacing={1}>
-                  <AttachMoney sx={{ fontSize: 18, color: '#666' }} />
                   <span>Базовая цена</span>
                 </Stack>
               </TableCell>

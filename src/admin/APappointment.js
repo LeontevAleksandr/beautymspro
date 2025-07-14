@@ -487,8 +487,8 @@ function APappointment({ records, clients, setClients, employees, services }) {
             }
 
         } catch (error) {
-            console.error('Ошибка при выполнении умного поиска:', error);
-            setServerError('Ошибка при поиске оптимального времени: ' + error.message);
+            console.error('Ошибка при выполнении поиска:', error);
+            setServerError('Ошибка при поиске времени: ' + error.message);
         } finally {
             setIsSearching(false);
         }
@@ -1913,7 +1913,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                             </Stack>
 
                             {/* Напоминание */}
-                            {!editMode && (
+                            {/* {!editMode && (
                                 <FormControl fullWidth size="small">
                                     <InputLabel>Напомнить за</InputLabel>
                                     <Select
@@ -1925,7 +1925,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                                         ))}
                                     </Select>
                                 </FormControl>
-                            )}
+                            )} */}
 
                             {/* Заметки */}
                             <TextField
@@ -1999,7 +1999,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <AutoFixHighIcon sx={{ color: '#1976d2' }} />
                         <Typography variant="h6" fontWeight={500}>
-                            Автоподбор оптимального времени
+                            Система подбора временного слота
                         </Typography>
                     </Box>
                 </DialogTitle>
@@ -2107,7 +2107,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                                             minWidth: 160
                                         }}
                                     >
-                                        {isSearching ? 'Поиск...' : 'Найти оптимальное время'}
+                                        {isSearching ? 'Поиск...' : 'Найти подходящий слот'}
                                     </Button>
                                 </Box>
                             </CardContent>
@@ -2119,7 +2119,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                                 <CardContent sx={{ p: 0 }}>
                                     <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0' }}>
                                         <Typography variant="subtitle2" fontWeight={600}>
-                                            Найдено {smartResults.length} оптимальных вариантов
+                                            Найдено {smartResults.length} вариантов
                                         </Typography>
                                     </Box>
                                     

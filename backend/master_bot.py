@@ -1,891 +1,219 @@
 import os
 import re
-import requests
-from datetime import datetime, timedelta, date
-from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
-import logging
-import pytz
+import asyncio
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Any
+from dataclasses import dataclass
 
-# Загрузка переменных окружения из .env файла
-load_dotenv()
+import aiohttp
+import pytz
+from dotenv import load_dotenv
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import (
+    Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+)
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+import logging
 
 # Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация
-BOT_TOKEN = os.environ.get('MASTER_BOT_TOKEN', 'YOUR_MASTER_BOT_TOKEN_HERE')
-API_BASE_URL = os.environ.get('API_BASE_URL', 'http://localhost:5000')
-TIMEZONE = pytz.timezone('Europe/Moscow')  # Временная зона салона
+# Загрузка конфигурации
+load_dotenv()
 
-# Состояния для ConversationHandler авторизации
-WAITING_PHONE, WAITING_PASSWORD, AUTHORIZED = range(3)
+@dataclass
+class Config:
+    bot_token: str = os.getenv('MASTER_BOT_TOKEN', 'YOUR_MASTER_BOT_TOKEN_HERE')
+    api_base_url: str = os.getenv('API_BASE_URL', 'http://localhost:5000')
+    timezone: pytz.BaseTzInfo = pytz.timezone('Europe/Moscow')
 
-# Состояния для просмотра расписания
-CHOOSING_DATE, VIEWING_SCHEDULE = range(2)
+config = Config()
 
-class MasterBot:
-    def __init__(self):
-        self.application = Application.builder().token(BOT_TOKEN).build()
-        self.user_data = {}  # Временное хранение данных пользователей
-        self.setup_handlers()
+# Состояния FSM
+class AuthStates(StatesGroup):
+    waiting_phone = State()
+    waiting_password = State()
+
+# Утилиты для работы с API
+class APIClient:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.session: Optional[aiohttp.ClientSession] = None
     
-    def setup_handlers(self):
-        """Настройка обработчиков команд"""
-        # Conversation handler для авторизации
-        auth_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', self.start)],
-            states={
-                WAITING_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_phone)],
-                WAITING_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_password)],
-            },
-            fallbacks=[CommandHandler('cancel', self.cancel_auth)]
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15),
+            connector=aiohttp.TCPConnector(limit=100)
         )
-        
-        # Обработчики для авторизованных пользователей
-        self.application.add_handler(auth_handler)
-        self.application.add_handler(CommandHandler('schedule', self.show_schedule_dates))
-        self.application.add_handler(CommandHandler('today', self.show_today_schedule))
-        self.application.add_handler(CommandHandler('tomorrow', self.show_tomorrow_schedule))
-        self.application.add_handler(CommandHandler('help', self.help_command))
-        self.application.add_handler(CallbackQueryHandler(self.handle_callback))
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        return self
     
-    def get_master_keyboard(self, is_authorized=False):
-        """Возвращает клавиатуру в зависимости от статуса авторизации"""
-        if is_authorized:
-            keyboard = [
-                ['📅 Расписание на сегодня', '📅 Расписание на завтра'],
-                ['📆 Выбрать дату', '❓ Помощь']
-            ]
-        else:
-            keyboard = [['❓ Помощь']]
-        
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
     
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Начало работы с ботом и авторизация"""
-        chat_id = update.effective_chat.id
-        user = update.effective_user
+    async def get(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+        """GET запрос к API"""
+        if not self.session:
+            raise RuntimeError("APIClient must be used as async context manager")
         
-        # Проверяем, авторизован ли уже мастер
+        url = f"{self.base_url}/api{endpoint}"
         try:
-            response = requests.get(
-                f"{API_BASE_URL}/api/telegram/master/{chat_id}",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                master_data = response.json()
-                await update.message.reply_text(
-                    f"Здравствуйте, {master_data['full_name']}! Вы уже авторизованы.\n\n"
-                    f"Используйте команды для просмотра расписания:",
-                    reply_markup=self.get_master_keyboard(is_authorized=True)
-                )
-                return ConversationHandler.END
-                
-        except Exception as e:
-            logger.error(f"Error checking master status: {e}")
-        
-        # Инициализируем данные пользователя
-        self.user_data[chat_id] = {}
-        
-        await update.message.reply_text(
-            f"Здравствуйте, {user.first_name}! 👋\n\n"
-            f"Для авторизации в системе Beauty Room, пожалуйста, введите ваш номер телефона в любом формате:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        
-        return WAITING_PHONE
-    
-    async def get_phone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Получение и валидация номера телефона"""
-        chat_id = update.effective_chat.id
-        phone_input = update.message.text.strip()
-        
-        normalized_phone = self.normalize_phone(phone_input)
-        
-        if not normalized_phone:
-            await update.message.reply_text(
-                "❌ Неверный формат номера телефона.\n\n"
-                "Пожалуйста, введите номер в одном из форматов:\n"
-                "• +79123456789\n"
-                "• 89123456789\n"
-                "• 9123456789"
-            )
-            return WAITING_PHONE
-        
-        self.user_data[chat_id]['phone'] = normalized_phone
-        
-        await update.message.reply_text(
-            "Теперь введите ваш пароль:"
-        )
-        
-        return WAITING_PASSWORD
-    
-    async def get_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Проверка пароля и авторизация"""
-        chat_id = update.effective_chat.id
-        password = update.message.text.strip()
-        
-        if chat_id not in self.user_data:
-            await update.message.reply_text(
-                "❌ Сессия истекла. Пожалуйста, начните заново с команды /start",
-                reply_markup=self.get_master_keyboard(is_authorized=False)
-            )
-            return ConversationHandler.END
-        
-        phone = self.user_data[chat_id]['phone']
-        
-        # Удаляем сообщение с паролем из соображений безопасности
-        try:
-            await update.message.delete()
-        except:
-            pass  # Игнорируем ошибки удаления
-        
-        try:
-            # Проверяем авторизацию мастера
-            auth_data = {
-                'phone': phone,
-                'password': password,
-                'telegram_chat_id': chat_id
-            }
-            
-            response = requests.post(
-                f"{API_BASE_URL}/api/telegram/master/auth",
-                json=auth_data,
-                timeout=15
-            )
-            
-            if response.status_code == 200:
-                response_data = response.json()
-                master_data = response_data.get('master', response_data)
-                
-                specialization = ""
-                if 'specialization' in master_data and master_data['specialization']:
-                    specialization = f"\n👩‍💼 Специализация: {master_data['specialization']['name']}"
-                
-                qualification = ""
-                if 'qualification' in master_data and master_data['qualification']:
-                    qualification = f"\n🏆 Квалификация: {master_data['qualification']['name']}"
-                
-                await update.message.reply_text(
-                    f"✅ Авторизация успешна!\n\n"
-                    f"Добро пожаловать, {master_data['full_name']}!{specialization}{qualification}\n\n"
-                    f"Теперь вы можете просматривать ваше расписание и записи клиентов.",
-                    reply_markup=self.get_master_keyboard(is_authorized=True)
-                )
-                
-                # Очищаем временные данные
-                if chat_id in self.user_data:
-                    del self.user_data[chat_id]
-                
-                return ConversationHandler.END
-                
-            else:
-                error_data = response.json() if response.content else {}
-                error_message = error_data.get('error', 'Неверный номер телефона или пароль')
-                
-                # Специальные сообщения для конкретных ошибок
-                if 'already linked to another master' in error_message:
-                    await update.message.reply_text(
-                        f"❌ Этот Telegram аккаунт уже привязан к другому мастеру: {error_data.get('linked_master', 'неизвестно')}\n\n"
-                        f"Обратитесь к администратору для решения проблемы.",
-                        reply_markup=self.get_master_keyboard(is_authorized=False)
-                    )
-                    return ConversationHandler.END
-                elif 'already linked to another Telegram account' in error_message:
-                    await update.message.reply_text(
-                        f"❌ Ваш аккаунт уже привязан к другому Telegram.\n\n"
-                        f"Обратитесь к администратору для отвязки старого аккаунта.",
-                        reply_markup=self.get_master_keyboard(is_authorized=False)
-                    )
-                    return ConversationHandler.END
-                elif 'Master not found' in error_message:
-                    await update.message.reply_text(
-                        f"❌ Мастер с номером {phone} не найден в системе.\n\n"
-                        f"Убедитесь, что вы вводите номер телефона, зарегистрированный в системе как сотрудник.\n"
-                        f"Обратитесь к администратору, если проблема не решается.",
-                        reply_markup=self.get_master_keyboard(is_authorized=False)
-                    )
-                    return ConversationHandler.END
-                elif 'Invalid password' in error_message:
-                    await update.message.reply_text(
-                        f"❌ Неверный пароль.\n\n"
-                        f"Пожалуйста, введите правильный пароль или используйте /cancel для отмены:"
-                    )
-                    return WAITING_PASSWORD
+            async with self.session.get(url, params=params) as response:
+                if response.status == 200:
+                    return await response.json()
+                elif response.status == 404:
+                    return None
                 else:
-                    await update.message.reply_text(
-                        f"❌ Ошибка авторизации: {error_message}\n\n"
-                        f"Попробуйте снова или используйте /cancel для отмены."
-                    )
-                    return WAITING_PHONE
-                    
-        except requests.exceptions.Timeout:
-            await update.message.reply_text(
-                "❌ Превышено время ожидания ответа сервера. Попробуйте позже.",
-                reply_markup=self.get_master_keyboard(is_authorized=False)
-            )
-            return ConversationHandler.END
-        except requests.exceptions.ConnectionError:
-            await update.message.reply_text(
-                "❌ Ошибка соединения с сервером. Проверьте интернет-соединение.",
-                reply_markup=self.get_master_keyboard(is_authorized=False)
-            )
-            return ConversationHandler.END
+                    logger.error(f"API GET {endpoint} failed: {response.status}")
+                    return None
         except Exception as e:
-            logger.error(f"Error during master authentication: {e}")
-            await update.message.reply_text(
-                "❌ Произошла неожиданная ошибка. Пожалуйста, попробуйте позже.",
-                reply_markup=self.get_master_keyboard(is_authorized=False)
-            )
-            return ConversationHandler.END
-    
-    async def cancel_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Отмена авторизации"""
-        chat_id = update.effective_chat.id
-        
-        if chat_id in self.user_data:
-            del self.user_data[chat_id]
-        
-        await update.message.reply_text(
-            "Авторизация отменена. Используйте /start для повторной попытки.",
-            reply_markup=self.get_master_keyboard(is_authorized=False)
-        )
-        
-        return ConversationHandler.END
-    
-    async def get_working_days(self, master_id, start_date, end_date):
-        """Получить рабочие дни сотрудника за период"""
-        try:
-            # Получаем все расписания сотрудника
-            response = requests.get(
-                f"{API_BASE_URL}/api/schedules",
-                timeout=10
-            )
-            
-            if response.status_code != 200:
-                logger.error(f"Failed to get schedules: {response.status_code}")
-                return []
-            
-            all_schedules = response.json()
-            # Фильтруем расписания для нашего мастера
-            schedules = [s for s in all_schedules if s.get('employee_id') == master_id]
-            
-            if not schedules:
-                logger.warning(f"No schedules found for master {master_id}")
-                return []
-            
-            working_days = []
-            current_date = start_date
-            
-            while current_date <= end_date:
-                is_working_day = False
-                
-                # Проверяем каждое расписание
-                for schedule in schedules:
-                    schedule_date = schedule.get('date')
-                    
-                    if schedule_date:
-                        # Если указана конкретная дата
-                        if schedule_date == current_date.strftime('%Y-%m-%d'):
-                            if schedule.get('start_time') and schedule.get('end_time'):
-                                is_working_day = True
-                                break
-                    else:
-                        # Если это регулярное расписание по дням недели
-                        weekday = current_date.weekday()  # 0=Понедельник, 6=Воскресенье
-                        schedule_weekday = schedule.get('weekday')
-                        
-                        if schedule_weekday is not None:
-                            # Приводим к одному формату (0=Понедельник, 6=Воскресенье)
-                            # Если в API воскресенье = 0, а понедельник = 1, то:
-                            if schedule_weekday == 0:  # Воскресенье в API
-                                api_weekday = 6  # Воскресенье в Python
-                            else:  # Понедельник-Суббота в API (1-6)
-                                api_weekday = schedule_weekday - 1  # Приводим к Python формату (0-5)
-                            
-                            if api_weekday == weekday:
-                                if schedule.get('start_time') and schedule.get('end_time'):
-                                    is_working_day = True
-                                    break
-                
-                if is_working_day:
-                    # Проверяем исключения в расписании
-                    try:
-                        exceptions_response = requests.get(
-                            f"{API_BASE_URL}/api/schedule_exceptions",
-                            timeout=10
-                        )
-                        
-                        has_exception = False
-                        if exceptions_response.status_code == 200:
-                            all_exceptions = exceptions_response.json()
-                            # Фильтруем исключения для нашего мастера и даты
-                            for exception in all_exceptions:
-                                if (exception.get('employee_id') == master_id and 
-                                    exception.get('date') == current_date.strftime('%Y-%m-%d')):
-                                    has_exception = True
-                                    break
-                        
-                        if not has_exception:
-                            working_days.append(current_date)
-                    except Exception as e:
-                        logger.error(f"Error checking exceptions: {e}")
-                        # Если не удалось проверить исключения, все равно добавляем день
-                        working_days.append(current_date)
-                
-                current_date += timedelta(days=1)
-            
-            logger.info(f"Found {len(working_days)} working days for master {master_id}")
-            return working_days
-            
-        except Exception as e:
-            logger.error(f"Error getting working days: {e}")
-            return []
-    
-    async def show_schedule_dates(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показать календарь для выбора даты (только рабочие дни)"""
-        chat_id = update.effective_chat.id
-        
-        # Проверяем авторизацию и получаем данные мастера
-        master_data = await self.get_master_data(update, chat_id)
-        if not master_data:
-            return
-        
-        master_id = master_data['id']
-        
-        # Получаем рабочие дни на ближайшие 14 дней
-        today = datetime.now(TIMEZONE).date()
-        end_date = today + timedelta(days=13)
-        
-        working_days = await self.get_working_days(master_id, today, end_date)
-        
-        if not working_days:
-            await update.message.reply_text(
-                "📅 На ближайшие 14 дней не найдено рабочих дней.\n"
-                "Обратитесь к администратору для настройки расписания.",
-                reply_markup=self.get_master_keyboard(is_authorized=True)
-            )
-            return
-        
-        # Создаем календарь только для рабочих дней
-        keyboard = []
-        row = []
-        
-        for working_date in working_days[:14]:  # Максимум 14 дней
-            date_str = working_date.strftime("%d.%m.%Y")
-            display_str = working_date.strftime("%d.%m")
-            
-            # Добавляем день недели для удобства
-            weekday_names = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-            weekday = weekday_names[working_date.weekday()]
-            display_str = f"{display_str} ({weekday})"
-            
-            callback_data = f"date_{date_str}"
-            row.append(InlineKeyboardButton(display_str, callback_data=callback_data))
-            
-            if len(row) == 2:  # По 2 кнопки в ряду для лучшего отображения
-                keyboard.append(row)
-                row = []
-        
-        # Добавляем последний ряд, если есть
-        if row:
-            keyboard.append(row)
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "📆 Выберите рабочий день для просмотра расписания:",
-            reply_markup=reply_markup
-        )
-    
-    async def show_today_schedule(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показать расписание на сегодня"""
-        chat_id = update.effective_chat.id
-        
-        # Проверяем авторизацию и получаем данные мастера
-        master_data = await self.get_master_data(update, chat_id)
-        if not master_data:
-            return
-        
-        today = datetime.now(TIMEZONE).date()
-        await self.fetch_and_show_schedule(update, master_data, today)
-    
-    async def show_tomorrow_schedule(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показать расписание на завтра"""
-        chat_id = update.effective_chat.id
-        
-        # Проверяем авторизацию и получаем данные мастера
-        master_data = await self.get_master_data(update, chat_id)
-        if not master_data:
-            return
-        
-        tomorrow = datetime.now(TIMEZONE).date() + timedelta(days=1)
-        await self.fetch_and_show_schedule(update, master_data, tomorrow)
-    
-    async def get_master_data(self, update, chat_id):
-        """Получить данные мастера с проверкой авторизации"""
-        try:
-            response = requests.get(
-                f"{API_BASE_URL}/api/telegram/master/{chat_id}",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                await update.message.reply_text(
-                    "❌ Не удалось получить данные о мастере. Пожалуйста, авторизуйтесь снова командой /start",
-                    reply_markup=self.get_master_keyboard(is_authorized=False)
-                )
-                return None
-                
-        except Exception as e:
-            logger.error(f"Error getting master data: {e}")
-            await update.message.reply_text(
-                "❌ Ошибка при получении данных мастера. Попробуйте позже.",
-                reply_markup=self.get_master_keyboard(is_authorized=False)
-            )
+            logger.error(f"API GET {endpoint} error: {e}")
             return None
     
-    async def fetch_and_show_schedule(self, update, master_data, selected_date):
-        """Получить и показать расписание на выбранную дату"""
+    async def post(self, endpoint: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """POST запрос к API"""
+        if not self.session:
+            raise RuntimeError("APIClient must be used as async context manager")
+        
+        url = f"{self.base_url}/api{endpoint}"
         try:
-            master_id = master_data['id']
-            master_name = master_data['full_name']
-            date_str = selected_date.strftime("%Y-%m-%d")
+            async with self.session.post(url, json=data) as response:
+                if response.status in (200, 201):
+                    return await response.json()
+                else:
+                    result = await response.json() if response.content_type == 'application/json' else {}
+                    result['_status_code'] = response.status
+                    return result
+        except Exception as e:
+            logger.error(f"API POST {endpoint} error: {e}")
+            return None
+
+# Утилиты
+class PhoneValidator:
+    @staticmethod
+    def normalize_phone(phone_input: str) -> Optional[str]:
+        """Нормализация номера телефона к формату +7XXXXXXXXXX для мастеров"""
+        digits_only = re.sub(r'\D', '', phone_input)
+        
+        if digits_only.startswith('79') and len(digits_only) == 11:
+            return '+' + digits_only
+        elif digits_only.startswith('89') and len(digits_only) == 11:
+            return '+7' + digits_only[1:]
+        elif digits_only.startswith('9') and len(digits_only) == 10:
+            return '+7' + digits_only
+        elif digits_only.startswith('7') and len(digits_only) == 11:
+            return '+' + digits_only
+        elif len(digits_only) == 10 and not digits_only.startswith(('7', '8')):
+            return '+7' + digits_only
+        elif digits_only.startswith('8') and len(digits_only) == 11:
+            return '+7' + digits_only[1:]
+        
+        return None
+
+class ScheduleManager:
+    @staticmethod
+    def parse_datetime(datetime_str: str) -> Optional[datetime]:
+        """Парсинг различных форматов datetime"""
+        if not datetime_str:
+            return None
+        
+        formats = [
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+        ]
+        
+        # Убираем 'Z' если есть
+        clean_str = datetime_str.replace('Z', '')
+        
+        for fmt in formats:
+            try:
+                return datetime.strptime(clean_str, fmt)
+            except ValueError:
+                continue
+        
+        # Fallback - пробуем fromisoformat
+        try:
+            return datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    
+    @staticmethod
+    def get_working_days_sync(schedules: List[Dict], master_id: int, 
+                            start_date: datetime, end_date: datetime) -> List[datetime]:
+        """Синхронное получение рабочих дней"""
+        working_days = []
+        current_date = start_date
+        
+        while current_date <= end_date:
+            is_working = False
             
-            # Получаем все записи и фильтруем по мастеру и дате
-            appointments_response = requests.get(
-                f"{API_BASE_URL}/api/appointments",
-                timeout=10
-            )
-            
-            appointments_data = []
-            if appointments_response.status_code == 200:
-                all_appointments = appointments_response.json()
-                # Фильтруем записи по мастеру и дате
-                for appointment in all_appointments:
-                    if appointment.get('employee_id') == master_id:
-                        # Улучшенный парсинг datetime
-                        datetime_str = appointment.get('datetime', '')
-                        
-                        try:
-                            # Пробуем разные форматы
-                            appointment_date = None
-                            
-                            # Формат 1: ISO с T и секундами (2024-05-25T14:30:00)
-                            if 'T' in datetime_str and not datetime_str.endswith('Z'):
-                                try:
-                                    appointment_dt = datetime.strptime(datetime_str, "%Y-%m-%dT%H:%M:%S")
-                                    appointment_date = appointment_dt.strftime("%Y-%m-%d")
-                                except:
-                                    pass
-                            
-                            # Формат 2: ISO с T, секундами и Z (2024-05-25T14:30:00Z)
-                            if not appointment_date and datetime_str.endswith('Z'):
-                                try:
-                                    appointment_dt = datetime.strptime(datetime_str[:-1], "%Y-%m-%dT%H:%M:%S")
-                                    appointment_date = appointment_dt.strftime("%Y-%m-%d")
-                                except:
-                                    pass
-                            
-                            # Формат 3: Простой с пробелом (2024-05-25 14:30:00)
-                            if not appointment_date and ' ' in datetime_str:
-                                try:
-                                    appointment_dt = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
-                                    appointment_date = appointment_dt.strftime("%Y-%m-%d")
-                                except:
-                                    pass
-                            
-                            # Формат 4: ISO полный с timezone
-                            if not appointment_date:
-                                try:
-                                    appointment_dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
-                                    appointment_date = appointment_dt.strftime("%Y-%m-%d")
-                                except:
-                                    pass
-                            
-                            # Формат 5: Простой fallback - берем первые 10 символов
-                            if not appointment_date:
-                                appointment_date = datetime_str[:10]
-                            
-                            # Сравниваем с выбранной датой
-                            if appointment_date == date_str:
-                                appointments_data.append(appointment)
-                                logger.info(f"Found appointment for {date_str}: {appointment}")
-                                
-                        except Exception as e:
-                            logger.error(f"Error parsing appointment datetime '{datetime_str}': {e}")
-                            # Fallback - пробуем старый метод
-                            if datetime_str[:10] == date_str:
-                                appointments_data.append(appointment)
-            else:
-                logger.error(f"Failed to get appointments: {appointments_response.status_code}")
-            
-            # Получаем дополнительные данные
-            clients_dict = {}
-            services_dict = {}
-            complexes_dict = {}
-            client_preferences = {}
-            client_statuses = {}
-            
-            if appointments_data:
-                # Получаем всех клиентов
-                try:
-                    clients_response = requests.get(f"{API_BASE_URL}/api/clients", timeout=10)
-                    if clients_response.status_code == 200:
-                        all_clients = clients_response.json()
-                        clients_dict = {client['id']: client for client in all_clients}
-                except Exception as e:
-                    logger.error(f"Error getting clients: {e}")
+            for schedule in schedules:
+                if schedule.get('employee_id') != master_id:
+                    continue
                 
-                # Получаем все услуги
-                try:
-                    services_response = requests.get(f"{API_BASE_URL}/api/services", timeout=10)
-                    if services_response.status_code == 200:
-                        all_services = services_response.json()
-                        services_dict = {service['id']: service for service in all_services}
-                except Exception as e:
-                    logger.error(f"Error getting services: {e}")
-                
-                # Получаем все комплексы
-                try:
-                    complexes_response = requests.get(f"{API_BASE_URL}/api/service_complexes", timeout=10)
-                    if complexes_response.status_code == 200:
-                        all_complexes = complexes_response.json()
-                        complexes_dict = {complex_item['id']: complex_item for complex_item in all_complexes}
-                except Exception as e:
-                    logger.error(f"Error getting service complexes: {e}")
-                
-                # Получаем предпочтения клиентов
-                try:
-                    preferences_response = requests.get(f"{API_BASE_URL}/api/client_preferences", timeout=10)
-                    if preferences_response.status_code == 200:
-                        all_preferences = preferences_response.json()
-                        client_preferences = {pref['client_id']: pref for pref in all_preferences}
-                        logger.info(f"Loaded {len(client_preferences)} client preferences")
-                except Exception as e:
-                    logger.error(f"Error getting client preferences: {e}")
-                
-                # Получаем статусы клиентов - пробуем разные эндпоинты
-                try:
-                    # Сначала пробуем основной эндпоинт
-                    statuses_response = requests.get(f"{API_BASE_URL}/api/client_statuses", timeout=10)
-                    logger.info(f"client_statuses endpoint response: {statuses_response.status_code}")
+                schedule_date = schedule.get('date')
+                if schedule_date:
+                    # Конкретная дата
+                    if schedule_date == current_date.strftime('%Y-%m-%d'):
+                        if schedule.get('start_time') and schedule.get('end_time'):
+                            is_working = True
+                            break
+                else:
+                    # Регулярное расписание
+                    weekday = current_date.weekday()
+                    schedule_weekday = schedule.get('weekday')
                     
-                    if statuses_response.status_code == 404:
-                        # Если не найден, пробуем альтернативные варианты
-                        logger.info("Trying alternative endpoints for client statuses")
-                        
-                        # Пробуем разные варианты названий
-                        alt_endpoints = [
-                            "clientstatuses", 
-                            "client-statuses",
-                            "statuses",
-                            "client_status"
-                        ]
-                        
-                        for endpoint in alt_endpoints:
-                            try:
-                                alt_response = requests.get(f"{API_BASE_URL}/api/{endpoint}", timeout=5)
-                                logger.info(f"Endpoint /api/{endpoint}: {alt_response.status_code}")
-                                if alt_response.status_code == 200:
-                                    statuses_response = alt_response
-                                    break
-                            except:
-                                continue
-                    
-                    if statuses_response.status_code == 200:
-                        all_statuses = statuses_response.json()
-                        if all_statuses:
-                            client_statuses = {status['id']: status for status in all_statuses}
-                            logger.info(f"Loaded {len(client_statuses)} client statuses: {list(client_statuses.keys())}")
-                            # Логируем первые несколько статусов для отладки
-                            for i, (status_id, status) in enumerate(client_statuses.items()):
-                                if i < 3:  # Первые 3 статуса
-                                    logger.info(f"Status {status_id} (type: {type(status_id)}): {status}")
-                        else:
-                            logger.warning("Client statuses response is empty")
-                    else:
-                        logger.error(f"Failed to get client statuses from all endpoints: {statuses_response.status_code}")
-                        if statuses_response.text:
-                            logger.error(f"Response: {statuses_response.text[:200]}")
-                        
-                        # Создаем базовые статусы как fallback
-                        client_statuses = {
-                            1: {"id": 1, "name": "Обычный"},
-                            2: {"id": 2, "name": "VIP"},
-                            3: {"id": 3, "name": "Постоянный"},
-                            9: {"id": 9, "name": "Особый"}  # Добавляем статус с ID 9, который был в примере
-                        }
-                        logger.info("Using fallback client statuses")
-                        
-                except Exception as e:
-                    logger.error(f"Error getting client statuses: {e}")
-                    # Fallback статусы
-                    client_statuses = {
-                        1: {"id": 1, "name": "Обычный"},
-                        2: {"id": 2, "name": "VIP"},
-                        3: {"id": 3, "name": "Постоянный"},
-                        9: {"id": 9, "name": "Особый"}
-                    }
-            
-            # Получаем все расписания и фильтруем по мастеру
-            schedule_response = requests.get(
-                f"{API_BASE_URL}/api/schedules",
-                timeout=10
-            )
-            
-            # Формируем сообщение с расписанием и записями
-            weekday_names = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье']
-            weekday = weekday_names[selected_date.weekday()]
-            
-            message = f"📅 Расписание {master_name}\n"
-            message += f"на {selected_date.strftime('%d.%m.%Y')} ({weekday}):\n\n"
-            
-            # Проверяем рабочие часы мастера
-            working_hours_found = False
-            if schedule_response.status_code == 200:
-                all_schedules = schedule_response.json()
-                # Фильтруем расписания для нашего мастера
-                master_schedules = [s for s in all_schedules if s.get('employee_id') == master_id]
-                
-                for schedule in master_schedules:
-                    schedule_date = schedule.get('date')
-                    
-                    # Проверяем точную дату
-                    if schedule_date and schedule_date == date_str:
-                        start_time = schedule.get('start_time', '')[:5] if schedule.get('start_time') else "Не указано"
-                        end_time = schedule.get('end_time', '')[:5] if schedule.get('end_time') else "Не указано"
-                        message += f"🕒 Рабочие часы: {start_time} - {end_time}\n"
-                        working_hours_found = True
-                        break
-                    # Проверяем регулярное расписание по дням недели
-                    elif not schedule_date:
-                        weekday_num = selected_date.weekday()
-                        schedule_weekday = schedule.get('weekday')
-                        
-                        if schedule_weekday is not None:
-                            # Приводим к одному формату
-                            if schedule_weekday == 0:  # Воскресенье в API
-                                api_weekday = 6
-                            else:
-                                api_weekday = schedule_weekday - 1
-                            
-                            if api_weekday == weekday_num:
-                                start_time = schedule.get('start_time', '')[:5] if schedule.get('start_time') else "Не указано"
-                                end_time = schedule.get('end_time', '')[:5] if schedule.get('end_time') else "Не указано"
-                                message += f"🕒 Рабочие часы: {start_time} - {end_time}\n"
-                                working_hours_found = True
+                    if schedule_weekday is not None:
+                        api_weekday = 6 if schedule_weekday == 0 else schedule_weekday - 1
+                        if api_weekday == weekday:
+                            if schedule.get('start_time') and schedule.get('end_time'):
+                                is_working = True
                                 break
             
-            if not working_hours_found:
-                message += "🕒 Рабочие часы: не указаны или выходной день\n"
+            if is_working:
+                working_days.append(current_date)
             
-            # Проверяем исключения в расписании
-            try:
-                exceptions_response = requests.get(
-                    f"{API_BASE_URL}/api/schedule_exceptions",
-                    timeout=10
-                )
-                
-                if exceptions_response.status_code == 200:
-                    all_exceptions = exceptions_response.json()
-                    for exception in all_exceptions:
-                        if (exception.get('employee_id') == master_id and 
-                            exception.get('date') == date_str):
-                            exception_type = exception.get('exception_type', 'исключение')
-                            reason = exception.get('reason', '')
-                            message += f"⚠️ {exception_type.capitalize()}"
-                            if reason:
-                                message += f": {reason}"
-                            message += "\n"
-            except Exception as e:
-                logger.error(f"Error getting exceptions: {e}")
-            
-            message += "\n📋 Записи клиентов:\n\n"
-            
-            if not appointments_data:
-                message += "📭 На эту дату нет записей.\n"
-            else:
-                # Сортируем записи по времени
-                appointments_data.sort(key=lambda x: x.get('datetime', ''))
-                
-                for idx, appointment in enumerate(appointments_data, 1):
-                    client_id = appointment.get('client_id')
-                    service_id = appointment.get('service_id')
-                    complex_id = appointment.get('complex_id')
-                    
-                    logger.info(f"Processing appointment {idx}: client_id={client_id}, service_id={service_id}, complex_id={complex_id}")
-                    
-                    # Получаем информацию о клиенте
-                    client_name = "Клиент не указан"
-                    if client_id and client_id in clients_dict:
-                        client_data = clients_dict[client_id]
-                        client_name = client_data.get('full_name', 'Имя не указано')
-                        logger.info(f"Found client: {client_name}")
-                    elif client_id:
-                        logger.warning(f"Client {client_id} not found in clients_dict")
-                    
-                    # Получаем информацию об услуге/комплексе
-                    service_name = "Услуга не указана"
-                    duration = 60  # По умолчанию
-                    
-                    if service_id and service_id in services_dict:
-                        service_data = services_dict[service_id]
-                        service_name = service_data.get('name', 'Услуга не указана')
-                        duration = service_data.get('duration', 60)
-                        logger.info(f"Found service: {service_name}")
-                    elif complex_id and complex_id in complexes_dict:
-                        complex_data = complexes_dict[complex_id]
-                        service_name = f"Комплекс: {complex_data.get('name', 'Комплекс не указан')}"
-                        duration = complex_data.get('duration', 60)
-                        logger.info(f"Found complex: {service_name}")
-                    elif service_id:
-                        logger.warning(f"Service {service_id} not found in services_dict")
-                    elif complex_id:
-                        logger.warning(f"Complex {complex_id} not found in complexes_dict")
-                    
-                    # Пользовательская продолжительность имеет приоритет
-                    if appointment.get('custom_duration'):
-                        duration = appointment['custom_duration']
-                    
-                    appointment_time = "Не указано"
-                    end_time = "Не указано"
-                    
-                    if appointment.get('datetime'):
-                        try:
-                            # Обрабатываем разные форматы даты
-                            dt_str = appointment['datetime']
-                            if dt_str.endswith('Z'):
-                                dt_str = dt_str[:-1] + '+00:00'
-                            
-                            appointment_datetime = datetime.fromisoformat(dt_str)
-                            
-                            # Конвертируем в локальное время
-                            if appointment_datetime.tzinfo:
-                                appointment_datetime = appointment_datetime.astimezone(TIMEZONE)
-                            else:
-                                appointment_datetime = TIMEZONE.localize(appointment_datetime)
-                            
-                            appointment_time = appointment_datetime.strftime("%H:%M")
-                            end_datetime = appointment_datetime + timedelta(minutes=duration)
-                            end_time = end_datetime.strftime("%H:%M")
-                        except Exception as e:
-                            logger.error(f"Error parsing datetime: {e}")
-                    
-                    # Определяем статус записи
-                    appointment_status = appointment.get('status', 'created').lower()
-                    status_icons = {
-                        'created': '🆕 Создана',
-                        'confirmed': '✅ Подтверждена', 
-                        'completed': '🏁 Завершена',
-                        'cancelled': '❌ Отменена'
-                    }
-                    
-                    # Если запись завершена, проверяем флаг is_completed
-                    if appointment.get('is_completed'):
-                        status_display = '🏁 Завершена'
-                    else:
-                        status_display = status_icons.get(appointment_status, f'❓ {appointment_status.capitalize()}')
-                    
-                    paid = "💰 Оплачена" if appointment.get('is_paid') else "💸 Не оплачена"
-                    
-                    final_price = appointment.get('final_price')
-                    if final_price:
-                        price_str = f"{final_price} руб."
-                    else:
-                        price_str = "Не указана"
-                    
-                    message += f"{idx}. 🕒 {appointment_time}-{end_time} ({duration} мин)\n"
-                    message += f"👤 {client_name}\n"
-                    message += f"💇‍♀️ {service_name}\n"
-                    message += f"💲 Стоимость: {price_str}\n"
-                    message += f"📊 {status_display}, {paid}\n"
-                    
-                    # Добавляем информацию о статусе клиента и предпочтениях
-                    if client_id:
-                        # Ищем предпочтения клиента
-                        client_pref = client_preferences.get(client_id)
-                        if client_pref:
-                            logger.info(f"Found client preferences for client {client_id}: {client_pref}")
-                            
-                            # Отображаем статус клиента
-                            client_status_id = client_pref.get('client_status_id')
-                            if client_status_id:
-                                logger.info(f"Looking for status ID {client_status_id} in available statuses: {list(client_statuses.keys())}")
-                                if client_status_id in client_statuses:
-                                    status_name = client_statuses[client_status_id].get('name', 'Неизвестный статус')
-                                    message += f"🏷️ Статус клиента: {status_name}\n"
-                                    logger.info(f"Client status: {status_name}")
-                                else:
-                                    # Попробуем найти статус по-другому - возможно API возвращает строку вместо числа
-                                    found_status = None
-                                    for status_key, status_data in client_statuses.items():
-                                        if str(status_key) == str(client_status_id):
-                                            found_status = status_data
-                                            break
-                                    
-                                    if found_status:
-                                        status_name = found_status.get('name', 'Неизвестный статус')
-                                        message += f"🏷️ Статус клиента: {status_name}\n"
-                                        logger.info(f"Client status (string match): {status_name}")
-                                    else:
-                                        message += f"🏷️ Статус клиента: Статус #{client_status_id} (не найден)\n"
-                                        logger.warning(f"Client status {client_status_id} (type: {type(client_status_id)}) not found in statuses")
-                            else:
-                                logger.info(f"No client_status_id found in preferences")
-                            
-                            # Отображаем предпочтения/заметки клиента
-                            preferences = client_pref.get('preferences', '').strip()
-                            if preferences:
-                                message += f"📋 Заметки по клиенту: {preferences}\n"
-                                logger.info(f"Client preferences: {preferences}")
-                        else:
-                            logger.info(f"No preferences found for client {client_id}")
-                    
-                    # Добавляем заметки по записи
-                    appointment_notes = appointment.get('notes', '').strip()
-                    if appointment_notes:
-                        message += f"📝 Заметки к записи: {appointment_notes}\n"
-                    
-                    message += "\n"
-            
-            # Разбиваем длинные сообщения
-            if len(message) > 4000:
-                parts = self.split_long_message(message)
-                for i, part in enumerate(parts):
-                    keyboard = self.get_master_keyboard(is_authorized=True) if i == len(parts) - 1 else None
-                    await update.message.reply_text(part, reply_markup=keyboard)
-            else:
-                await update.message.reply_text(
-                    message,
-                    reply_markup=self.get_master_keyboard(is_authorized=True)
-                )
-                
-        except Exception as e:
-            logger.error(f"Error fetching schedule: {e}")
-            await update.message.reply_text(
-                f"❌ Произошла ошибка при получении расписания на {selected_date.strftime('%d.%m.%Y')}.\n"
-                f"Попробуйте позже или обратитесь к администратору.",
-                reply_markup=self.get_master_keyboard(is_authorized=True)
-            )
+            current_date += timedelta(days=1)
+        
+        return working_days
+
+class UIHelper:
+    @staticmethod
+    def get_master_keyboard(is_authorized: bool = False) -> ReplyKeyboardMarkup:
+        """Получить клавиатуру для мастера"""
+        if is_authorized:
+            buttons = [
+                [KeyboardButton(text='📅 Расписание на сегодня'), KeyboardButton(text='📅 Расписание на завтра')],
+                [KeyboardButton(text='📆 Выбрать дату'), KeyboardButton(text='❓ Помощь')]
+            ]
+        else:
+            buttons = [[KeyboardButton(text='❓ Помощь')]]
+        
+        return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     
-    def split_long_message(self, message):
+    @staticmethod
+    def split_long_message(message: str, max_length: int = 4000) -> List[str]:
         """Разбивает длинное сообщение на части"""
+        if len(message) <= max_length:
+            return [message]
+        
         parts = []
         lines = message.split('\n')
         current_part = ""
         
         for line in lines:
-            if len(current_part + line + '\n') > 4000:
+            if len(current_part + line + '\n') > max_length:
                 if current_part:
                     parts.append(current_part.rstrip())
                 current_part = line + '\n'
@@ -896,170 +224,587 @@ class MasterBot:
             parts.append(current_part.rstrip())
         
         return parts if parts else [message]
+
+# Основной класс бота для мастеров
+class MasterBot:
+    def __init__(self):
+        self.bot = Bot(
+            token=config.bot_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        self.dp = Dispatcher(storage=MemoryStorage())
+        self.api_client = APIClient(config.api_base_url)
+        self._setup_handlers()
     
-    def format_phone_display(self, phone):
-        """Форматирует телефон для красивого отображения"""
-        if not phone:
-            return ""
+    def _setup_handlers(self):
+        """Настройка обработчиков"""
+        # Команды
+        self.dp.message.register(self.cmd_start, Command("start"))
+        self.dp.message.register(self.cmd_help, Command("help"))
+        self.dp.message.register(self.cmd_today, Command("today"))
+        self.dp.message.register(self.cmd_tomorrow, Command("tomorrow"))
+        self.dp.message.register(self.cmd_schedule, Command("schedule"))
         
-        # Убираем все нецифровые символы
-        digits = re.sub(r'\D', '', phone)
+        # Авторизация
+        self.dp.message.register(
+            self.get_phone,
+            StateFilter(AuthStates.waiting_phone)
+        )
+        self.dp.message.register(
+            self.get_password,
+            StateFilter(AuthStates.waiting_password)
+        )
         
-        if len(digits) == 11 and digits.startswith('7'):
-            return f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
-        elif len(digits) == 10:
-            return f"+7 ({digits[0:3]}) {digits[3:6]}-{digits[6:8]}-{digits[8:10]}"
+        # Кнопки меню
+        self.dp.message.register(
+            self.cmd_today,
+            F.text == "📅 Расписание на сегодня"
+        )
+        self.dp.message.register(
+            self.cmd_tomorrow,
+            F.text == "📅 Расписание на завтра"
+        )
+        self.dp.message.register(
+            self.cmd_schedule,
+            F.text == "📆 Выбрать дату"
+        )
+        self.dp.message.register(
+            self.cmd_help,
+            F.text == "❓ Помощь"
+        )
         
-        return phone
+        # Callback queries
+        self.dp.callback_query.register(self.handle_date_selection)
+        
+        # Отмена операций
+        self.dp.message.register(self.cancel_operation, Command("cancel"))
+        
+        # Остальные сообщения
+        self.dp.message.register(self.handle_unknown_message)
     
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработка callback-запросов от инлайн-кнопок"""
-        query = update.callback_query
-        await query.answer()
+    async def _get_master_by_chat_id(self, chat_id: int) -> Optional[Dict[str, Any]]:
+        """Получить данные мастера по chat_id"""
+        async with self.api_client as client:
+            return await client.get(f"/telegram/master/{chat_id}")
+    
+    async def _check_authorization(self, chat_id: int) -> bool:
+        """Проверить авторизацию мастера"""
+        master_data = await self._get_master_by_chat_id(chat_id)
+        return master_data is not None
+    
+    # Команды
+    async def cmd_start(self, message: Message, state: FSMContext):
+        """Начало работы и авторизация"""
+        await state.clear()
+        chat_id = message.chat.id
+        user_name = message.from_user.first_name
         
-        chat_id = query.message.chat_id
-        callback_data = query.data
+        # Проверяем авторизацию
+        master_data = await self._get_master_by_chat_id(chat_id)
         
-        # Обработка выбора даты
-        if callback_data.startswith("date_"):
-            date_str = callback_data.replace("date_", "")
-            selected_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+        if master_data:
+            spec_text = ""
+            qual_text = ""
             
-            # Получаем данные мастера
-            master_data = await self.get_master_data(query, chat_id)
-            if not master_data:
-                return
+            if master_data.get('specialization'):
+                spec_text = f"\n👩‍💼 Специализация: {master_data['specialization']['name']}"
+            if master_data.get('qualification'):
+                qual_text = f"\n🏆 Квалификация: {master_data['qualification']['name']}"
             
-            await self.fetch_and_show_schedule(query, master_data, selected_date)
-    
-    async def check_master_auth(self, update, chat_id):
-        """Проверка авторизации мастера"""
-        try:
-            response = requests.get(
-                f"{API_BASE_URL}/api/telegram/master/{chat_id}",
-                timeout=10
+            await message.answer(
+                f"Здравствуйте, {master_data['full_name']}! Вы уже авторизованы.{spec_text}{qual_text}\n\n"
+                f"Используйте команды для просмотра расписания:",
+                reply_markup=UIHelper.get_master_keyboard(is_authorized=True)
             )
-            
-            if response.status_code == 200:
-                return True
-            else:
-                await update.message.reply_text(
-                    "❌ Вы не авторизованы. Пожалуйста, используйте /start для авторизации.",
-                    reply_markup=self.get_master_keyboard(is_authorized=False)
-                )
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error checking master auth: {e}")
-            await update.message.reply_text(
-                "❌ Ошибка проверки авторизации. Пожалуйста, используйте /start для авторизации.",
-                reply_markup=self.get_master_keyboard(is_authorized=False)
-            )
-            return False
-    
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показать справку по командам"""
-        chat_id = update.effective_chat.id
+            return
         
-        # Проверяем, авторизован ли мастер
-        is_authorized = False
-        try:
-            response = requests.get(f"{API_BASE_URL}/api/telegram/master/{chat_id}", timeout=10)
-            if response.status_code == 200:
-                is_authorized = True
-        except:
-            pass
-        
-        help_text = """🤖 О боте Beauty Room для мастеров:\n\nЯ помогу вам просматривать ваше расписание и записи клиентов.\n\n"""
-        
-        if is_authorized:
-            help_text += """🎯 Основные возможности:\n• Просмотр расписания на любую дату\n• Просмотр записей клиентов\n• Информация о клиентах и услугах\n• Отображение только рабочих дней\n\n💇‍♀️ Доступные команды:\n/schedule - Выбрать рабочий день для просмотра расписания\n/today - Показать расписание на сегодня\n/tomorrow - Показать расписание на завтра\n/help - Получить помощь\n\n📅 Особенности:\n• Календарь показывает только ваши рабочие дни\n• Записи отфильтрованы по вашему ID\n• Учитываются исключения в расписании (отпуска, больничные)"""
-        else:
-            help_text += """Для начала работы используйте команду /start и пройдите авторизацию, указав ваш номер телефона и пароль."""
-        
-        await update.message.reply_text(
-            help_text,
-            reply_markup=self.get_master_keyboard(is_authorized=is_authorized)
+        await state.set_state(AuthStates.waiting_phone)
+        await message.answer(
+            f"Здравствуйте, {user_name}! 👋\n\n"
+            f"Для авторизации в системе Beauty Room, пожалуйста, введите ваш номер телефона:",
+            reply_markup=ReplyKeyboardRemove()
         )
     
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик обычных сообщений"""
-        text = update.message.text.lower()
-        chat_id = update.effective_chat.id
+    async def cmd_help(self, message: Message, state: FSMContext):
+        """Справка по командам"""
+        await state.clear()
+        chat_id = message.chat.id
+        is_authorized = await self._check_authorization(chat_id)
         
-        # Проверяем, авторизован ли мастер
-        is_authorized = False
+        help_text = "🤖 О боте Beauty Room для мастеров:\n\n" \
+                   "Я помогу вам просматривать ваше расписание и записи клиентов.\n\n"
+        
+        if is_authorized:
+            help_text += """🎯 Основные возможности:
+• Просмотр расписания на любую дату
+• Просмотр записей клиентов
+• Информация о клиентах и услугах
+• Отображение только рабочих дней
+
+💇‍♀️ Доступные команды:
+/schedule - Выбрать рабочий день
+/today - Расписание на сегодня
+/tomorrow - Расписание на завтра
+/help - Получить помощь
+
+📅 Особенности:
+• Календарь показывает только ваши рабочие дни
+• Записи отфильтрованы по вашему ID
+• Учитываются исключения в расписании"""
+        else:
+            help_text += "Для начала работы используйте /start и пройдите авторизацию."
+        
+        await message.answer(
+            help_text,
+            reply_markup=UIHelper.get_master_keyboard(is_authorized)
+        )
+    
+    async def cmd_today(self, message: Message, state: FSMContext):
+        """Расписание на сегодня"""
+        await state.clear()
+        chat_id = message.chat.id
+        
+        master_data = await self._get_master_by_chat_id(chat_id)
+        if not master_data:
+            await message.answer(
+                "❌ Не удалось получить данные мастера. Авторизуйтесь командой /start",
+                reply_markup=UIHelper.get_master_keyboard(False)
+            )
+            return
+        
+        today = datetime.now(config.timezone).date()
+        await self._show_schedule(message, master_data, today)
+    
+    async def cmd_tomorrow(self, message: Message, state: FSMContext):
+        """Расписание на завтра"""
+        await state.clear()
+        chat_id = message.chat.id
+        
+        master_data = await self._get_master_by_chat_id(chat_id)
+        if not master_data:
+            await message.answer(
+                "❌ Не удалось получить данные мастера. Авторизуйтесь командой /start",
+                reply_markup=UIHelper.get_master_keyboard(False)
+            )
+            return
+        
+        tomorrow = datetime.now(config.timezone).date() + timedelta(days=1)
+        await self._show_schedule(message, master_data, tomorrow)
+    
+    async def cmd_schedule(self, message: Message, state: FSMContext):
+        """Выбор даты для просмотра расписания"""
+        await state.clear()
+        chat_id = message.chat.id
+        
+        master_data = await self._get_master_by_chat_id(chat_id)
+        if not master_data:
+            await message.answer(
+                "❌ Не удалось получить данные мастера. Авторизуйтесь командой /start",
+                reply_markup=UIHelper.get_master_keyboard(False)
+            )
+            return
+        
+        await self._show_date_selection(message, master_data)
+    
+    async def cancel_operation(self, message: Message, state: FSMContext):
+        """Отмена операции"""
+        await state.clear()
+        chat_id = message.chat.id
+        is_authorized = await self._check_authorization(chat_id)
+        
+        await message.answer(
+            "Операция отменена.",
+            reply_markup=UIHelper.get_master_keyboard(is_authorized)
+        )
+    
+    # Авторизация
+    async def get_phone(self, message: Message, state: FSMContext):
+        """Получение номера телефона"""
+        phone_input = message.text.strip()
+        normalized_phone = PhoneValidator.normalize_phone(phone_input)
+        
+        if not normalized_phone:
+            await message.answer(
+                "❌ Неверный формат номера телефона.\n\n"
+                "Пожалуйста, введите номер в одном из форматов:\n"
+                "• +79123456789\n"
+                "• 89123456789\n"
+                "• 9123456789"
+            )
+            return
+        
+        await state.update_data(phone=normalized_phone)
+        await state.set_state(AuthStates.waiting_password)
+        await message.answer("Теперь введите ваш пароль:")
+    
+    async def get_password(self, message: Message, state: FSMContext):
+        """Проверка пароля и авторизация"""
+        password = message.text.strip()
+        data = await state.get_data()
+        phone = data.get('phone')
+        chat_id = message.chat.id
+        
+        # Удаляем сообщение с паролем
         try:
-            response = requests.get(f"{API_BASE_URL}/api/telegram/master/{chat_id}", timeout=10)
-            if response.status_code == 200:
-                is_authorized = True
+            await message.delete()
         except:
             pass
         
-        if "расписание на сегодня" in text:
-            if is_authorized:
-                await self.show_today_schedule(update, context)
-            else:
-                await update.message.reply_text(
-                    "Для просмотра расписания необходимо авторизоваться. Используйте /start.",
-                    reply_markup=self.get_master_keyboard(is_authorized=False)
+        if not phone:
+            await state.clear()
+            await message.answer(
+                "❌ Сессия истекла. Начните заново с /start",
+                reply_markup=UIHelper.get_master_keyboard(False)
+            )
+            return
+        
+        # Авторизация
+        auth_data = {
+            'phone': phone,
+            'password': password,
+            'telegram_chat_id': chat_id
+        }
+        
+        async with self.api_client as client:
+            response = await client.post("/telegram/master/auth", auth_data)
+            
+            if not response:
+                await message.answer(
+                    "❌ Ошибка соединения с сервером. Попробуйте позже.",
+                    reply_markup=UIHelper.get_master_keyboard(False)
                 )
-        elif "расписание на завтра" in text:
-            if is_authorized:
-                await self.show_tomorrow_schedule(update, context)
-            else:
-                await update.message.reply_text(
-                    "Для просмотра расписания необходимо авторизоваться. Используйте /start.",
-                    reply_markup=self.get_master_keyboard(is_authorized=False)
+                await state.clear()
+                return
+            
+            status_code = response.get('_status_code', 200)
+            
+            if status_code == 200:
+                master_data = response.get('master', response)
+                
+                spec_text = ""
+                qual_text = ""
+                if master_data.get('specialization'):
+                    spec_text = f"\n👩‍💼 Специализация: {master_data['specialization']['name']}"
+                if master_data.get('qualification'):
+                    qual_text = f"\n🏆 Квалификация: {master_data['qualification']['name']}"
+                
+                await message.answer(
+                    f"✅ Авторизация успешна!\n\n"
+                    f"Добро пожаловать, {master_data['full_name']}!{spec_text}{qual_text}\n\n"
+                    f"Теперь вы можете просматривать ваше расписание и записи клиентов.",
+                    reply_markup=UIHelper.get_master_keyboard(True)
                 )
-        elif "выбрать дату" in text:
-            if is_authorized:
-                await self.show_schedule_dates(update, context)
+                await state.clear()
             else:
-                await update.message.reply_text(
-                    "Для просмотра расписания необходимо авторизоваться. Используйте /start.",
-                    reply_markup=self.get_master_keyboard(is_authorized=False)
-                )
-        elif "помощь" in text:
-            await self.help_command(update, context)
+                error_message = response.get('error', 'Неизвестная ошибка')
+                
+                if 'already linked to another master' in error_message:
+                    await message.answer(
+                        f"❌ Этот Telegram аккаунт уже привязан к другому мастеру.\n"
+                        f"Обратитесь к администратору.",
+                        reply_markup=UIHelper.get_master_keyboard(False)
+                    )
+                    await state.clear()
+                elif 'already linked to another Telegram account' in error_message:
+                    await message.answer(
+                        f"❌ Ваш аккаунт уже привязан к другому Telegram.\n"
+                        f"Обратитесь к администратору для отвязки.",
+                        reply_markup=UIHelper.get_master_keyboard(False)
+                    )
+                    await state.clear()
+                elif 'Master not found' in error_message:
+                    await message.answer(
+                        f"❌ Мастер с номером {phone} не найден в системе.\n"
+                        f"Убедитесь, что номер зарегистрирован как сотрудник.",
+                        reply_markup=UIHelper.get_master_keyboard(False)
+                    )
+                    await state.clear()
+                elif 'Invalid password' in error_message:
+                    await message.answer(
+                        f"❌ Неверный пароль. Попробуйте снова или /cancel для отмены:"
+                    )
+                else:
+                    await message.answer(
+                        f"❌ Ошибка авторизации: {error_message}",
+                        reply_markup=UIHelper.get_master_keyboard(False)
+                    )
+                    await state.clear()
+    
+    # Работа с расписанием
+    async def _show_date_selection(self, message: Message, master_data: Dict):
+        """Показать календарь для выбора даты"""
+        master_id = master_data['id']
+        
+        # Получаем рабочие дни
+        async with self.api_client as client:
+            schedules = await client.get("/schedules") or []
+        
+        today = datetime.now(config.timezone).date()
+        end_date = today + timedelta(days=13)
+        
+        working_days = ScheduleManager.get_working_days_sync(
+            schedules, master_id, today, end_date
+        )
+        
+        if not working_days:
+            await message.answer(
+                "📅 На ближайшие 14 дней не найдено рабочих дней.\n"
+                "Обратитесь к администратору для настройки расписания.",
+                reply_markup=UIHelper.get_master_keyboard(True)
+            )
+            return
+        
+        # Создаем календарь
+        keyboard = []
+        row = []
+        
+        weekday_names = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+        
+        for working_date in working_days[:14]:
+            date_str = working_date.strftime("%d.%m.%Y")
+            display_str = working_date.strftime("%d.%m")
+            weekday = weekday_names[working_date.weekday()]
+            display_str = f"{display_str} ({weekday})"
+            
+            row.append(InlineKeyboardButton(
+                text=display_str,
+                callback_data=f"date_{date_str}"
+            ))
+            
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        
+        if row:
+            keyboard.append(row)
+        
+        await message.answer(
+            "📆 Выберите рабочий день для просмотра расписания:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+    
+    async def handle_date_selection(self, callback: CallbackQuery, state: FSMContext):
+        """Обработка выбора даты"""
+        await callback.answer()
+        
+        if not callback.data.startswith("date_"):
+            return
+        
+        date_str = callback.data.replace("date_", "")
+        selected_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+        
+        chat_id = callback.message.chat.id
+        master_data = await self._get_master_by_chat_id(chat_id)
+        
+        if not master_data:
+            await callback.message.answer(
+                "❌ Не удалось получить данные мастера. Авторизуйтесь командой /start",
+                reply_markup=UIHelper.get_master_keyboard(False)
+            )
+            return
+        
+        await self._show_schedule(callback.message, master_data, selected_date)
+    
+    async def _show_schedule(self, message: Message, master_data: Dict, selected_date: datetime):
+        """Показать расписание на выбранную дату"""
+        master_id = master_data['id']
+        master_name = master_data['full_name']
+        date_str = selected_date.strftime("%Y-%m-%d")
+        
+        async with self.api_client as client:
+            # Получаем все данные параллельно
+            appointments_data, schedules_data, clients_data, services_data = await asyncio.gather(
+                client.get("/appointments"),
+                client.get("/schedules"),
+                client.get("/clients"),
+                client.get("/services"),
+                return_exceptions=True
+            )
+            
+            # Фильтруем записи мастера на выбранную дату
+            master_appointments = []
+            if isinstance(appointments_data, list):
+                for apt in appointments_data:
+                    if apt.get('employee_id') == master_id:
+                        apt_dt = ScheduleManager.parse_datetime(apt.get('datetime', ''))
+                        if apt_dt and apt_dt.strftime("%Y-%m-%d") == date_str:
+                            master_appointments.append(apt)
+            
+            # Создаем словари для быстрого поиска
+            clients_dict = {c['id']: c for c in (clients_data or [])} if isinstance(clients_data, list) else {}
+            services_dict = {s['id']: s for s in (services_data or [])} if isinstance(services_data, list) else {}
+        
+        # Формируем сообщение
+        weekday_names = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье']
+        weekday = weekday_names[selected_date.weekday()]
+        
+        message_text = f"📅 Расписание {master_name}\n" \
+                      f"на {selected_date.strftime('%d.%m.%Y')} ({weekday}):\n\n"
+        
+        # Рабочие часы
+        working_hours = self._get_working_hours(schedules_data or [], master_id, selected_date, date_str)
+        message_text += f"🕒 Рабочие часы: {working_hours}\n\n"
+        
+        # Записи
+        message_text += "📋 Записи клиентов:\n\n"
+        
+        if not master_appointments:
+            message_text += "📭 На эту дату нет записей.\n"
         else:
-            await update.message.reply_text(
+            # Сортируем по времени
+            master_appointments.sort(key=lambda x: x.get('datetime', ''))
+            
+            for idx, apt in enumerate(master_appointments, 1):
+                appointment_info = self._format_appointment(apt, clients_dict, services_dict, idx)
+                message_text += appointment_info + "\n"
+        
+        # Отправляем сообщение (разбиваем если длинное)
+        message_parts = UIHelper.split_long_message(message_text)
+        
+        for i, part in enumerate(message_parts):
+            keyboard = UIHelper.get_master_keyboard(True) if i == len(message_parts) - 1 else None
+            await message.answer(part, reply_markup=keyboard)
+    
+    def _get_working_hours(self, schedules: List[Dict], master_id: int, 
+                          selected_date: datetime, date_str: str) -> str:
+        """Получить рабочие часы мастера на дату"""
+        for schedule in schedules:
+            if schedule.get('employee_id') != master_id:
+                continue
+            
+            schedule_date = schedule.get('date')
+            
+            # Точная дата
+            if schedule_date and schedule_date == date_str:
+                start_time = schedule.get('start_time', '')[:5] if schedule.get('start_time') else "Не указано"
+                end_time = schedule.get('end_time', '')[:5] if schedule.get('end_time') else "Не указано"
+                return f"{start_time} - {end_time}"
+            
+            # Регулярное расписание
+            elif not schedule_date:
+                weekday_num = selected_date.weekday()
+                schedule_weekday = schedule.get('weekday')
+                
+                if schedule_weekday is not None:
+                    api_weekday = 6 if schedule_weekday == 0 else schedule_weekday - 1
+                    if api_weekday == weekday_num:
+                        start_time = schedule.get('start_time', '')[:5] if schedule.get('start_time') else "Не указано"
+                        end_time = schedule.get('end_time', '')[:5] if schedule.get('end_time') else "Не указано"
+                        return f"{start_time} - {end_time}"
+        
+        return "не указаны или выходной день"
+    
+    def _format_appointment(self, apt: Dict, clients_dict: Dict, 
+                           services_dict: Dict, idx: int) -> str:
+        """Форматировать информацию о записи"""
+        # Клиент
+        client_name = "Клиент не указан"
+        if apt.get('client_id') and apt['client_id'] in clients_dict:
+            client_name = clients_dict[apt['client_id']].get('full_name', 'Имя не указано')
+        
+        # Услуга
+        service_name = "Услуга не указана"
+        duration = 60
+        
+        if apt.get('service_id') and apt['service_id'] in services_dict:
+            service_data = services_dict[apt['service_id']]
+            service_name = service_data.get('name', 'Услуга не указана')
+            duration = service_data.get('duration', 60)
+        
+        # Пользовательская продолжительность имеет приоритет
+        if apt.get('custom_duration'):
+            duration = apt['custom_duration']
+        
+        # Время
+        appointment_time = "Не указано"
+        end_time = "Не указано"
+        
+        if apt.get('datetime'):
+            apt_dt = ScheduleManager.parse_datetime(apt['datetime'])
+            if apt_dt:
+                # Конвертируем в локальное время
+                if apt_dt.tzinfo:
+                    apt_dt = apt_dt.astimezone(config.timezone)
+                else:
+                    apt_dt = config.timezone.localize(apt_dt)
+                
+                appointment_time = apt_dt.strftime("%H:%M")
+                end_dt = apt_dt + timedelta(minutes=duration)
+                end_time = end_dt.strftime("%H:%M")
+        
+        # Статус записи
+        status_icons = {
+            'created': '🆕 Создана',
+            'confirmed': '✅ Подтверждена',
+            'completed': '🏁 Завершена',
+            'cancelled': '❌ Отменена'
+        }
+        
+        if apt.get('is_completed'):
+            status_display = '🏁 Завершена'
+        else:
+            appointment_status = apt.get('status', 'created').lower()
+            status_display = status_icons.get(appointment_status, f'❓ {appointment_status.capitalize()}')
+        
+        # Оплата
+        paid = "💰 Оплачена" if apt.get('is_paid') else "💸 Не оплачена"
+        
+        # Стоимость
+        final_price = apt.get('final_price')
+        price_str = f"{final_price} руб." if final_price else "Не указана"
+        
+        # Заметки
+        notes = apt.get('notes', '').strip()
+        notes_str = f"\n📝 Заметки: {notes}" if notes else ""
+        
+        return f"""{idx}. 🕒 {appointment_time}-{end_time} ({duration} мин)
+👤 {client_name}
+💇‍♀️ {service_name}
+💲 Стоимость: {price_str}
+📊 {status_display}, {paid}{notes_str}"""
+    
+    async def handle_unknown_message(self, message: Message, state: FSMContext):
+        """Обработчик неизвестных сообщений"""
+        await state.clear()
+        text = message.text.lower()
+        chat_id = message.chat.id
+        
+        is_authorized = await self._check_authorization(chat_id)
+        
+        if any(phrase in text for phrase in ['расписание', 'график', 'записи']):
+            if is_authorized:
+                if 'сегодня' in text:
+                    await self.cmd_today(message, state)
+                elif 'завтра' in text:
+                    await self.cmd_tomorrow(message, state)
+                else:
+                    await self.cmd_schedule(message, state)
+            else:
+                await message.answer(
+                    "Для просмотра расписания необходимо авторизоваться. Используйте /start.",
+                    reply_markup=UIHelper.get_master_keyboard(False)
+                )
+        elif any(word in text for word in ['помощь', 'help', 'команды']):
+            await self.cmd_help(message, state)
+        else:
+            await message.answer(
                 "Выберите действие из меню:",
-                reply_markup=self.get_master_keyboard(is_authorized=is_authorized)
+                reply_markup=UIHelper.get_master_keyboard(is_authorized)
             )
     
-    def normalize_phone(self, phone_input):
-        """Нормализация номера телефона к формату +7XXXXXXXXXX для совместимости с базой сотрудников"""
-        import re
-        digits_only = re.sub(r'\D', '', phone_input)
-        
-        # Приводим все форматы к +7XXXXXXXXXX для сотрудников
-        if digits_only.startswith('79') and len(digits_only) == 11:
-            return '+' + digits_only  # 79010010101 -> +79010010101
-        elif digits_only.startswith('89') and len(digits_only) == 11:
-            return '+7' + digits_only[1:]  # 89010010101 -> +79010010101
-        elif digits_only.startswith('9') and len(digits_only) == 10:
-            return '+7' + digits_only  # 9010010101 -> +79010010101
-        elif digits_only.startswith('7') and len(digits_only) == 11:
-            return '+' + digits_only  # 79010010101 -> +79010010101
-        elif len(digits_only) == 10 and not digits_only.startswith(('7', '8')):
-            return '+7' + digits_only  # 9010010101 -> +79010010101
-        elif digits_only.startswith('8') and len(digits_only) == 11:
-            return '+7' + digits_only[1:]  # 89010010101 -> +79010010101
-        elif len(digits_only) == 11 and digits_only.startswith('7'):
-            return '+' + digits_only  # 79010010101 -> +79010010101
-        
-        return None
-    
-    def run(self):
+    async def run(self):
         """Запуск бота"""
-        logger.info("Starting Beauty Room Master Telegram Bot...")
-        self.application.run_polling()
+        logger.info("Starting Beauty Room Master Telegram Bot with aiogram v3...")
+        await self.dp.start_polling(self.bot)
 
-if __name__ == '__main__':
-    if BOT_TOKEN == 'YOUR_MASTER_BOT_TOKEN_HERE':
+# Основная функция
+async def main():
+    if config.bot_token == 'YOUR_MASTER_BOT_TOKEN_HERE':
         print("Пожалуйста, установите MASTER_BOT_TOKEN в переменных окружения")
-        exit(1)
+        return
     
     bot = MasterBot()
-    bot.run()
+    await bot.run()
+
+if __name__ == '__main__':
+    asyncio.run(main())
