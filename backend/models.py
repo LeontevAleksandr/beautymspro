@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, BigInteger, Text, Date, Time, Table
 from sqlalchemy.orm import relationship
-from .database import Base
+from database import Base  # Убрана точка
+from datetime import datetime
 from sqlalchemy import Enum
 import enum
 
@@ -209,24 +210,6 @@ class Appointment(Base):
     services = relationship("Service", secondary="appointment_service_pivot", back_populates="appointments")
     complexes = relationship("ServiceComplex", secondary="appointment_complex_pivot", back_populates="appointments")
 
-class NotificationStatus(enum.Enum):
-    scheduled = "scheduled"
-    sent = "sent"
-    failed = "failed"
-
-class Notification(Base):
-    __tablename__ = 'notifications'
-    id = Column(Integer, primary_key=True, index=True)
-    appointment_id = Column(Integer, ForeignKey('appointments.id'))
-    scheduled_at = Column(DateTime)
-    sent_at = Column(DateTime, nullable=True)
-    status = Column(Enum(NotificationStatus), nullable=False)
-    attempts = Column(Integer, default=0)
-    created_at = Column(DateTime)
-    updated_at = Column(DateTime)
-    
-    appointment = relationship("Appointment", back_populates="notifications")
-
 class EmployeeWorkload(Base):
     __tablename__ = 'employee_workload'
     schedule_id = Column(Integer, ForeignKey('schedules.id'), primary_key=True)
@@ -235,3 +218,90 @@ class EmployeeWorkload(Base):
     workload_percent = Column(Float)
     
     schedule = relationship("Schedule", back_populates="workload")
+
+class NotificationStatus(enum.Enum):
+    scheduled = "scheduled"   # Запланировано
+    sent = "sent"            # Отправлено
+    delivered = "delivered"   # Доставлено
+    failed = "failed"        # Ошибка
+    cancelled = "cancelled"   # Отменено
+
+# Расширенные типы уведомлений
+class NotificationType(enum.Enum):
+    appointment_reminder = "appointment_reminder"  # Напоминание клиенту о записи
+    appointment_created = "appointment_created"    # Уведомление мастеру о новой записи
+    appointment_confirmed = "appointment_confirmed" # Подтверждение записи
+    appointment_cancelled = "appointment_cancelled" # Отмена записи
+    admin_notification = "admin_notification"      # Уведомления для админа
+
+# Получатели уведомлений
+class NotificationRecipient(enum.Enum):
+    client = "client"
+    employee = "employee" 
+    admin = "admin"
+
+# Статусы уведомлений
+class NotificationStatus(enum.Enum):
+    scheduled = "scheduled"   # Запланировано
+    sent = "sent"            # Отправлено
+    delivered = "delivered"   # Доставлено
+    failed = "failed"        # Ошибка
+    cancelled = "cancelled"   # Отменено
+
+class Notification(Base):
+    __tablename__ = 'notifications'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Основная информация
+    type = Column(Enum(NotificationType), nullable=False)
+    recipient_type = Column(Enum(NotificationRecipient), nullable=False)
+    
+    # Связи
+    appointment_id = Column(Integer, ForeignKey('appointments.id'))
+    client_id = Column(Integer, ForeignKey('clients.id'), nullable=True)
+    employee_id = Column(Integer, ForeignKey('employees.id'), nullable=True)
+    
+    # Telegram специфика
+    telegram_chat_id = Column(BigInteger, nullable=True)
+    message_id = Column(BigInteger, nullable=True)  # ID отправленного сообщения
+    
+    # Временные метки
+    scheduled_at = Column(DateTime)
+    sent_at = Column(DateTime, nullable=True)
+    delivered_at = Column(DateTime, nullable=True)
+    
+    # Статус и попытки
+    status = Column(Enum(NotificationStatus), default=NotificationStatus.scheduled)
+    attempts = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=3)
+    
+    # Контент
+    title = Column(String(255), nullable=True)
+    message = Column(Text, nullable=True)
+    additional_data = Column(Text, nullable=True)  # JSON для дополнительных данных
+    
+    # Системные поля
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+    
+    # Relationships
+    appointment = relationship("Appointment", back_populates="notifications")
+    client = relationship("Client")
+    employee = relationship("Employee")
+
+# Добавляем таблицу для действий пользователей с уведомлениями
+class NotificationAction(Base):
+    __tablename__ = 'notification_actions'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    notification_id = Column(Integer, ForeignKey('notifications.id'))
+    
+    action_type = Column(String(50))  # 'confirm', 'cancel', 'reschedule'
+    telegram_chat_id = Column(BigInteger)
+    callback_data = Column(String(255))
+    
+    performed_at = Column(DateTime)
+    created_at = Column(DateTime)
+    
+    notification = relationship("Notification")

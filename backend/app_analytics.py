@@ -1,10 +1,10 @@
 from flask import Flask, jsonify, request
 from datetime import datetime, date, time, timedelta
 import enum
-from .database import engine
-from .models import Base
+from database import engine # Убрана точка
+from models import Base # Убрана точка
 
-from .models import (
+from models import ( # Убрана точка
     ClientStatus, Client, Specialization, Employee, 
     ServiceComplex, Service, Appointment, Schedule,
     ClientPreferences, ScheduleException, Notification,
@@ -14,7 +14,7 @@ from .models import (
     SpecializationQualificationPivot, ServiceQualificationPivot
 )
 
-from .database import SessionLocal
+from database import SessionLocal # Убрана точка
 from sqlalchemy.exc import IntegrityError
 import os
 import psycopg2

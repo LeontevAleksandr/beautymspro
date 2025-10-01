@@ -2,8 +2,9 @@ import os
 import re
 import asyncio
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass
+import json
 
 import aiohttp
 import pytz
@@ -54,6 +55,10 @@ class BookingStates(StatesGroup):
     choosing_time = State()
     confirming_appointment = State()
     setting_reminder = State()
+
+class CancellationStates(StatesGroup):
+    selecting_appointment = State()
+    confirming_cancellation = State()
 
 # Утилиты для работы с API
 class APIClient:
@@ -109,6 +114,15 @@ class APIClient:
                 return await response.json()
             else:
                 response.raise_for_status()
+    
+    async def delete(self, endpoint: str) -> bool:
+        """DELETE запрос к API"""
+        if not self.session:
+            raise RuntimeError("APIClient must be used as async context manager")
+        
+        url = f"{self.base_url}/api{endpoint}"
+        async with self.session.delete(url) as response:
+            return response.status == 200
 
 # Утилиты
 class PhoneValidator:
@@ -192,8 +206,8 @@ class UIHelper:
         if is_registered:
             buttons = [
                 [KeyboardButton(text='💇‍♀️ Записаться на услугу')],
-                [KeyboardButton(text='📅 Мои записи'), KeyboardButton(text='📋 Мой профиль')],
-                [KeyboardButton(text='❓ Помощь')]
+                [KeyboardButton(text='📅 Мои записи'), KeyboardButton(text='🔔 Мои напоминания')],
+                [KeyboardButton(text='📋 Мой профиль'), KeyboardButton(text='❓ Помощь')]
             ]
         else:
             buttons = [
@@ -277,12 +291,30 @@ class BeautyRoomBot:
             F.text == "📅 Мои записи"
         )
         self.dp.message.register(
+            self.my_notifications,
+            F.text == "🔔 Мои напоминания"
+        )
+        self.dp.message.register(
             self.check_status,
             F.text == "📋 Мой профиль"
         )
         self.dp.message.register(
             self.cmd_help,
             F.text == "❓ Помощь"
+        )
+        
+        # Обработчики callback для уведомлений
+        self.dp.callback_query.register(
+            self.handle_notification_action,
+            F.data.startswith("confirm_appointment_") | 
+            F.data.startswith("cancel_appointment_") |
+            F.data.startswith("reschedule_appointment_")
+        )
+        
+        # Обработчики для управления записями
+        self.dp.callback_query.register(
+            self.handle_appointment_action,
+            F.data.startswith("manage_apt_")
         )
         
         # Обработчик отмены
@@ -339,7 +371,8 @@ class BeautyRoomBot:
 • Запись на любые услуги студии
 • Выбор удобного времени и мастера
 • Просмотр ваших записей
-• Получение напоминаний о визитах
+• Управление напоминаниями
+• Отмена или перенос записей
 
 💇‍♀️ Процесс записи:
 1. Нажмите "Записаться на услугу"
@@ -349,6 +382,11 @@ class BeautyRoomBot:
 5. Выберите дату и время
 6. Подтвердите запись
 7. Установите напоминание (опционально)
+
+🔔 Уведомления:
+• Автоматические напоминания о записях
+• Возможность подтвердить, отменить или перенести прямо из уведомления
+• Настройка времени напоминания
 
 📞 Если возникли сложности, вы можете позвонить администратору салона:
 +7(950)136-58-23"""
@@ -461,76 +499,47 @@ class BeautyRoomBot:
             await message.answer("Пожалуйста, выберите один из предложенных вариантов:")
     
     async def _register_client(self, message: Message, state: FSMContext):
-        """Регистрация клиента"""
+        """Регистрация клиента через новый эндпоинт"""
         data = await state.get_data()
         chat_id = message.chat.id
         
         try:
             async with self.api_client as client:
-                # Проверяем существующих клиентов
-                clients = await client.get("/clients")
-                existing_client = None
+                # Используем новый эндпоинт для связывания Telegram
+                link_data = {
+                    'phone': data['phone'],
+                    'telegram_chat_id': chat_id,
+                    'full_name': data['name']
+                }
                 
-                if clients:
-                    for c in clients:
-                        if c['phone'] == data['phone']:
-                            existing_client = c
-                            break
+                result = await client.post("/telegram/link-client", link_data)
                 
-                if existing_client:
-                    # Обновляем существующего клиента
-                    if existing_client.get('telegram_chat_id') and existing_client['telegram_chat_id'] != chat_id:
-                        await message.answer(
-                            f"❌ Клиент с номером {existing_client['phone']} уже привязан к другому Telegram аккаунту.",
-                            reply_markup=UIHelper.get_main_keyboard(False)
-                        )
-                        await state.clear()
-                        return
-                    
-                    update_data = {
-                        'full_name': data['name'],
-                        'phone': existing_client['phone'],
-                        'email': existing_client.get('email'),
-                        'telegram_chat_id': chat_id
-                    }
-                    
-                    await client.put(f"/clients/{existing_client['id']}", update_data)
-                    
-                    name_changed = existing_client['full_name'] != data['name']
-                    if name_changed:
+                if result.get('success'):
+                    client_data = result.get('client')
+                    if result.get('created'):
                         success_text = (
-                            f"✅ Добро пожаловать, {data['name']}!\n\n"
-                            f"Ваш аккаунт обновлен и привязан к Telegram.\n"
-                            f"Имя изменено с '{existing_client['full_name']}' на '{data['name']}'.\n\n"
+                            f"✅ Добро пожаловать в бьюти-студию Beauty Room 38, {data['name']}!\n\n"
+                            f"Ваш аккаунт создан и привязан к Telegram.\n"
+                            f"Теперь вы будете получать уведомления о записях.\n\n"
                             f"Выберите действие из меню:"
                         )
                     else:
                         success_text = (
-                            f"✅ Добро пожаловать обратно, {data['name']}!\n\n"
+                            f"✅ Добро пожаловать обратно, {client_data['full_name']}!\n\n"
                             f"Ваш аккаунт успешно привязан к Telegram.\n\n"
                             f"Выберите действие из меню:"
                         )
-                else:
-                    # Создаем нового клиента
-                    new_client_data = {
-                        'full_name': data['name'],
-                        'phone': data['phone'],
-                        'telegram_chat_id': chat_id
-                    }
                     
-                    await client.post("/clients", new_client_data)
-                    
-                    success_text = (
-                        f"✅ Добро пожаловать в бьюти-студию Beauty Room 38, {data['name']}!\n\n"
-                        f"Ваш аккаунт создан и привязан к Telegram.\n"
-                        f"Теперь вы будете получать уведомления о записях.\n\n"
-                        f"Выберите действие из меню:"
+                    await message.answer(
+                        success_text,
+                        reply_markup=UIHelper.get_main_keyboard(True)
                     )
-                
-                await message.answer(
-                    success_text,
-                    reply_markup=UIHelper.get_main_keyboard(True)
-                )
+                else:
+                    error_msg = result.get('error', 'Неизвестная ошибка')
+                    await message.answer(
+                        f"❌ {error_msg}",
+                        reply_markup=UIHelper.get_main_keyboard(False)
+                    )
                 
         except Exception as e:
             logger.error(f"Error during registration: {e}")
@@ -1114,13 +1123,13 @@ class BeautyRoomBot:
         
         details = f"""📋 Подтвердите запись:
 
-        👤 Клиент: {data['client_name']}
-        💅 Услуга: {data['service_name']}
-        👨‍💼 Мастер: {data['employee_name']}
-        📅 Дата: {date_display}
-        ⏰ Время: {time_display} - {end_time_display}
-        💰 Стоимость: {int(float(data['service_price']))} ₽
-        ⏱️ Длительность: {duration} минут"""
+👤 Клиент: {data['client_name']}
+💅 Услуга: {data['service_name']}
+👨‍💼 Мастер: {data['employee_name']}
+📅 Дата: {date_display}
+⏰ Время: {time_display} - {end_time_display}
+💰 Стоимость: {int(float(data['service_price']))} ₽
+⏱️ Длительность: {duration} минут"""
         
         keyboard = [
             [InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_yes")],
@@ -1162,7 +1171,16 @@ class BeautyRoomBot:
                 
                 await state.update_data(appointment_id=appointment_response['id'])
                 
+                # Автоматически отправляем уведомление мастеру
+                try:
+                    await client.post("/notifications/send-employee-notification", {
+                        'appointment_id': appointment_response['id']
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to send employee notification: {e}")
+                
                 keyboard = [
+                    [InlineKeyboardButton(text="⏰ За 30 минут", callback_data="reminder_30m")],
                     [InlineKeyboardButton(text="⏰ За 1 час", callback_data="reminder_1h")],
                     [InlineKeyboardButton(text="⏰ За 2 часа", callback_data="reminder_2h")],
                     [InlineKeyboardButton(text="⏰ За день", callback_data="reminder_24h")],
@@ -1195,33 +1213,29 @@ class BeautyRoomBot:
         success_msg = "✅ Запись создана!\n\n"
         
         if callback.data != "reminder_no":
-            appointment_datetime = datetime.strptime(
-                f"{data['date']} {data['time']}", 
-                "%Y-%m-%d %H:%M"
-            )
+            minutes_before = {
+                "reminder_30m": 30,
+                "reminder_1h": 60,
+                "reminder_2h": 120,
+                "reminder_24h": 1440
+            }.get(callback.data, 60)
             
-            if callback.data == "reminder_1h":
-                reminder_time = appointment_datetime - timedelta(hours=1)
-                reminder_text = "за 1 час"
-            elif callback.data == "reminder_2h":
-                reminder_time = appointment_datetime - timedelta(hours=2)
-                reminder_text = "за 2 часа"
-            else:  # reminder_24h
-                reminder_time = appointment_datetime - timedelta(days=1)
-                reminder_text = "за день"
+            reminder_text = {
+                "reminder_30m": "за 30 минут",
+                "reminder_1h": "за 1 час",
+                "reminder_2h": "за 2 часа",
+                "reminder_24h": "за день"
+            }.get(callback.data, "за час")
             
             try:
-                notification_data = {
-                    'appointment_id': data['appointment_id'],
-                    'scheduled_at': reminder_time.isoformat(),
-                    'status': 'pending'
-                }
-                
                 async with self.api_client as client:
-                    await client.post("/notifications", notification_data)
+                    await client.post("/notifications/create-reminder", {
+                        'appointment_id': data['appointment_id'],
+                        'minutes_before': minutes_before
+                    })
                     success_msg = f"✅ Отлично! Напоминание установлено {reminder_text} до визита.\n\n"
             except Exception as e:
-                logger.error(f"Error creating notification: {e}")
+                logger.error(f"Error creating reminder: {e}")
         
         # Формируем финальное сообщение
         date_str = data['date']
@@ -1250,6 +1264,47 @@ class BeautyRoomBot:
         )
         
         await state.clear()
+    
+    # Обработчики уведомлений
+    async def handle_notification_action(self, callback: CallbackQuery):
+        """Обработка действий с уведомлениями (подтверждение, отмена, перенос)"""
+        await callback.answer()
+        
+        action_type = callback.data.split('_')[0]
+        notification_id = int(callback.data.split('_')[-1])
+        
+        try:
+            async with self.api_client as client:
+                # Отправляем действие на сервер
+                result = await client.post("/notifications/process-action", {
+                    'notification_id': notification_id,
+                    'action_type': action_type,
+                    'telegram_chat_id': callback.from_user.id,
+                    'callback_data': callback.data
+                })
+                
+                if action_type == "confirm":
+                    await callback.message.edit_text(
+                        "✅ Спасибо! Ваша запись подтверждена.\n"
+                        "Ждем вас в указанное время! ✨"
+                    )
+                elif action_type == "cancel":
+                    await callback.message.edit_text(
+                        "❌ Ваша запись отменена.\n"
+                        "Если захотите записаться снова, я всегда к вашим услугам!"
+                    )
+                elif action_type == "reschedule":
+                    await callback.message.edit_text(
+                        "📞 Для переноса записи, пожалуйста, свяжитесь с администратором:\n"
+                        "+7(950)136-58-23\n\n"
+                        "Или начните новую запись через меню."
+                    )
+        except Exception as e:
+            logger.error(f"Error processing notification action: {e}")
+            await callback.message.edit_text(
+                "❌ Произошла ошибка при обработке вашего запроса.\n"
+                "Пожалуйста, свяжитесь с администратором."
+            )
     
     # Основные функции
     async def my_appointments(self, message: Message, state: FSMContext):
@@ -1284,7 +1339,7 @@ class BeautyRoomBot:
                 for apt in all_appointments:
                     if apt['client_id'] == client_data['id']:
                         apt_datetime = datetime.fromisoformat(apt['datetime'].replace('Z', '+00:00'))
-                        if apt_datetime.replace(tzinfo=None) > now:
+                        if apt_datetime.replace(tzinfo=None) > now and not apt.get('status') == 'cancelled':
                             client_appointments.append(apt)
                 
                 if not client_appointments:
@@ -1296,6 +1351,9 @@ class BeautyRoomBot:
                 
                 # Сортируем по дате
                 client_appointments.sort(key=lambda x: x['datetime'])
+                
+                # Создаем клавиатуру для управления записями
+                keyboard = []
                 
                 # Формируем сообщение
                 msg = "📅 Ваши предстоящие записи:\n\n"
@@ -1325,9 +1383,24 @@ class BeautyRoomBot:
                     
                     msg += f"{i}. {status} {date_display} в {time_display}\n"
                     msg += f"   💅 {service_name}\n"
-                    msg += f"   👤 {employee_name}\n\n"
+                    msg += f"   👤 {employee_name}\n"
+                    
+                    # Добавляем кнопку управления записью, если она в будущем
+                    if apt_datetime.replace(tzinfo=None) > now + timedelta(hours=2):
+                        keyboard.append([InlineKeyboardButton(
+                            text=f"🔧 Управление записью #{i}",
+                            callback_data=f"manage_apt_{apt['id']}"
+                        )])
+                    
+                    msg += "\n"
                 
-                await message.answer(msg, reply_markup=UIHelper.get_main_keyboard(True))
+                if keyboard:
+                    await message.answer(
+                        msg,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                    )
+                else:
+                    await message.answer(msg, reply_markup=UIHelper.get_main_keyboard(True))
                 
         except Exception as e:
             logger.error(f"Error getting appointments: {e}")
@@ -1336,8 +1409,25 @@ class BeautyRoomBot:
                 reply_markup=UIHelper.get_main_keyboard(True)
             )
     
-    async def check_status(self, message: Message, state: FSMContext):
-        """Проверка статуса аккаунта"""
+    async def handle_appointment_action(self, callback: CallbackQuery):
+        """Обработка действий с записями"""
+        await callback.answer()
+        
+        appointment_id = int(callback.data.split('_')[-1])
+        
+        keyboard = [
+            [InlineKeyboardButton(text="❌ Отменить запись", callback_data=f"cancel_apt_{appointment_id}")],
+            [InlineKeyboardButton(text="📞 Перенести запись", callback_data=f"reschedule_apt_{appointment_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_appointments")]
+        ]
+        
+        await callback.message.edit_text(
+            "Выберите действие с записью:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+    
+    async def my_notifications(self, message: Message, state: FSMContext):
+        """Показать активные напоминания"""
         await state.clear()
         chat_id = message.chat.id
         
@@ -1362,6 +1452,140 @@ class BeautyRoomBot:
                 reply_markup=UIHelper.get_main_keyboard(True)
             )
     
+    async def check_status(self, message: Message, state: FSMContext):
+        """Проверка статуса аккаунта"""
+        await state.clear()
+        chat_id = message.chat.id
+        
+        try:
+            client_data = await self._get_client_by_chat_id(chat_id)
+            
+            if client_data:
+                # Получаем статистику записей
+                async with self.api_client as client:
+                    appointments = await client.get("/appointments")
+                    if appointments:
+                        client_appointments = [apt for apt in appointments if apt['client_id'] == client_data['id']]
+                        total_appointments = len(client_appointments)
+                        completed_appointments = len([
+                            apt for apt in client_appointments 
+                            if apt.get('is_completed')
+                        ])
+                    else:
+                        total_appointments = 0
+                        completed_appointments = 0
+                
+                text = (f"📋 Информация о вашем аккаунте:\n\n"
+                    f"👤 Имя: {client_data['full_name']}\n"
+                    f"📱 Телефон: {client_data['phone']}\n"
+                    f"📧 Email: {client_data.get('email', 'Не указан')}\n"
+                    f"📊 Всего записей: {total_appointments}\n"
+                    f"✅ Завершенных: {completed_appointments}\n\n"
+                    f"🔔 Статус уведомлений: Активны\n"
+                    f"🆔 ID в системе: {client_data['id']}")
+                    
+                await message.answer(text, reply_markup=UIHelper.get_main_keyboard(True))
+            else:
+                await message.answer(
+                    "❌ Ваш аккаунт не найден.\n\nВыберите действие из меню:",
+                    reply_markup=UIHelper.get_main_keyboard(False)
+                )
+        except Exception as e:
+            logger.error(f"Error checking status: {e}")
+            await message.answer(
+                "❌ Ошибка при проверке статуса аккаунта.",
+                reply_markup=UIHelper.get_main_keyboard(True)
+            )
+
+    async def my_notifications(self, message: Message, state: FSMContext):
+        """Показать активные напоминания пользователя"""
+        await state.clear()
+        chat_id = message.chat.id
+        
+        try:
+            client_data = await self._get_client_by_chat_id(chat_id)
+            
+            if not client_data:
+                await message.answer(
+                    "❌ Вы не зарегистрированы в системе.\n\nВыберите действие из меню:",
+                    reply_markup=UIHelper.get_main_keyboard(False)
+                )
+                return
+            
+            async with self.api_client as client:
+                # Получаем уведомления клиента
+                notifications = await client.get("/notifications", params={
+                    'recipient_type': 'client',
+                    'status': 'scheduled'
+                })
+                
+                if not notifications:
+                    await message.answer(
+                        "🔔 У вас нет активных напоминаний.\n\n"
+                        "Напоминания автоматически создаются при записи на услуги, "
+                        "если вы выбираете эту опцию.",
+                        reply_markup=UIHelper.get_main_keyboard(True)
+                    )
+                    return
+                
+                # Фильтруем уведомления текущего клиента
+                client_notifications = [
+                    n for n in notifications 
+                    if n.get('client_id') == client_data['id']
+                ]
+                
+                if not client_notifications:
+                    await message.answer(
+                        "🔔 У вас нет активных напоминаний.\n\n"
+                        "Напоминания автоматически создаются при записи на услуги.",
+                        reply_markup=UIHelper.get_main_keyboard(True)
+                    )
+                    return
+                
+                # Сортируем по времени отправки
+                client_notifications.sort(key=lambda x: x['scheduled_at'])
+                
+                msg = "🔔 Ваши активные напоминания:\n\n"
+                
+                for i, notification in enumerate(client_notifications[:10], 1):
+                    try:
+                        scheduled_at = datetime.fromisoformat(notification['scheduled_at'].replace('Z', '+00:00'))
+                        scheduled_display = scheduled_at.strftime("%d.%m.%Y в %H:%M")
+                        
+                        # Получаем информацию о записи
+                        if notification.get('appointment_id'):
+                            appointment = await client.get(f"/appointments/{notification['appointment_id']}")
+                            if appointment:
+                                apt_datetime = datetime.fromisoformat(appointment['datetime'].replace('Z', '+00:00'))
+                                apt_display = apt_datetime.strftime("%d.%m.%Y в %H:%M")
+                                
+                                service_name = "Услуга"
+                                if appointment.get('service_id'):
+                                    service = await client.get(f"/services/{appointment['service_id']}")
+                                    if service:
+                                        service_name = service['name']
+                                
+                                msg += f"{i}. 📅 Запись: {apt_display}\n"
+                                msg += f"   💅 {service_name}\n"
+                                msg += f"   ⏰ Напоминание: {scheduled_display}\n\n"
+                            else:
+                                msg += f"{i}. ⏰ Напоминание: {scheduled_display}\n\n"
+                        else:
+                            msg += f"{i}. ⏰ Напоминание: {scheduled_display}\n\n"
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing notification {notification.get('id')}: {e}")
+                        continue
+                
+                await message.answer(msg, reply_markup=UIHelper.get_main_keyboard(True))
+                
+        except Exception as e:
+            logger.error(f"Error getting notifications: {e}")
+            await message.answer(
+                "❌ Произошла ошибка при получении уведомлений.",
+                reply_markup=UIHelper.get_main_keyboard(True)
+            )
+
     async def handle_unknown_message(self, message: Message, state: FSMContext):
         """Обработчик неизвестных сообщений"""
         await state.clear()

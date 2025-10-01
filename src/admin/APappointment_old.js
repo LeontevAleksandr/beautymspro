@@ -1913,7 +1913,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                             </Stack>
 
                             {/* Напоминание */}
-                            {/* {!editMode && (
+                            {!editMode && (
                                 <FormControl fullWidth size="small">
                                     <InputLabel>Напомнить за</InputLabel>
                                     <Select
@@ -1925,7 +1925,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                                         ))}
                                     </Select>
                                 </FormControl>
-                            )} */}
+                            )} 
 
                             {/* Заметки */}
                             <TextField

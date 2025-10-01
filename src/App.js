@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Typography } from '@mui/material';
 import AdminPanel from './admin/AdminPanel';
 import MasterPanel from './master/MasterPanel';
+import APappointment from './admin/APappointment';
 
 function App() {
   const [records, setRecords] = useState([]);
@@ -22,7 +23,7 @@ function App() {
       setServices(servicesData);
       setEmployees(employeesData);
 
-      // Преобразуем данные для таблицы
+      // Преобразуем данные для таблицы (для обратной совместимости с AdminPanel)
       const formatted = appointments.map(item => {
         const client = clientsData.find(c => c.id === item.client_id);
         const service = servicesData.find(s => s.id === item.service_id);
@@ -38,22 +39,65 @@ function App() {
         };
       });
       setRecords(formatted);
+    }).catch(error => {
+      console.error('Ошибка при загрузке данных:', error);
     });
   }, []);
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/admin" element={<AdminPanel records={records} />} />
-        <Route path="/master" element={<MasterPanel />} />
-        <Route path="/" element={<Home />} />
+        <Route 
+          path="/admin" 
+          element={<AdminPanel records={records} />} 
+        />
+        <Route 
+          path="/master" 
+          element={<MasterPanel />} 
+        />
+        <Route 
+          path="/appointments" 
+          element={
+            <APappointment 
+              records={records}
+              clients={clients}
+              setClients={setClients}
+              employees={employees}
+              services={services}
+            />
+          } 
+        />
+        <Route 
+          path="/" 
+          element={<Home />} 
+        />
       </Routes>
     </BrowserRouter>
   );
 }
 
 function Home() {
-  return <Typography variant="h6" align="center">Добро пожаловать в админ-панель!</Typography>;
+  return (
+    <div style={{ padding: '20px', textAlign: 'center' }}>
+      <Typography variant="h4" gutterBottom>
+        Добро пожаловать в систему управления салоном красоты!
+      </Typography>
+      <Typography variant="h6" color="textSecondary">
+        Выберите раздел:
+      </Typography>
+      <div style={{ marginTop: '20px' }}>
+        <Typography variant="body1">
+          • <a href="/admin">Админ панель</a> - управление записями
+        </Typography>
+        <Typography variant="body1">
+          • <a href="/appointments">Расписание записей</a> - новый интерфейс
+        </Typography>
+        <Typography variant="body1">
+          • <a href="/master">Панель мастера</a> - рабочее место мастера
+        </Typography>
+      </div>
+    </div>
+  );
 }
 
 export default App;
