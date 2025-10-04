@@ -12,3 +12,7 @@ pytz==2024.2
 
 # Optional: Better logging and debugging
 colorlog==6.8.2
+
+Flask
+
+sqlalchemy
