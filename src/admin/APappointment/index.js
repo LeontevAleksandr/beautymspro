@@ -9,6 +9,7 @@ import { useResizeHandler } from './hooks/useResizeHandler.js';
 import { useFormHandlers } from './hooks/useFormHandlers.js';
 import { useCrudHandlers } from './hooks/useCrudHandlers.js';
 import { useRenderHelpers } from './hooks/useRenderHelpers.js';
+import { useServiceFilter } from './hooks/useServiceFilter.js';
 
 // Компоненты
 import { AppointmentHeader } from './components/AppointmentHeader.js';
@@ -64,6 +65,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
         availableEmployees,
         setAvailableEmployees,
         serviceQualifications,
+        qualificationsCache,
         servicePrice,
         setServicePrice,
 
@@ -89,7 +91,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
         conflictDetails,
         setConflictDetails,
 
-        // Функции
+        // Функции загрузки
         loadAppointmentsForDate,
         loadNotifications,
         showSnackbar,
@@ -187,8 +189,12 @@ function APappointment({ records, clients, setClients, employees, services }) {
         newRecord,
         setAvailableEmployees,
         setServicePrice,
-        setNewRecord
+        setNewRecord,
+        showSnackbar
     });
+
+    // ==================== ФИЛЬТРАЦИЯ УСЛУГ ПО МАСТЕРУ ====================
+    const filteredServices = useServiceFilter(services, employees, newRecord, serviceQualifications);
 
     // ==================== РЕНДЕР ХЕЛПЕРЫ ====================
     const { renderAppointmentCell } = useRenderHelpers({
@@ -241,6 +247,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                 // Данные
                 clientsArray={clientsArray}
                 servicesArray={servicesArray}
+                filteredServices={filteredServices}
                 availableEmployees={availableEmployees}
                 appointments={appointments}
                 newRecord={newRecord}

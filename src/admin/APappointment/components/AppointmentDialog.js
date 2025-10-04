@@ -26,6 +26,7 @@ export const AppointmentDialog = ({
     // Данные
     clientsArray,
     servicesArray,
+    filteredServices, // ДОБАВЛЕНО: отфильтрованные услуги по мастеру
     availableEmployees,
     appointments, // ДОБАВЛЕНО для ClientSelector
     newRecord,
@@ -188,7 +189,7 @@ export const AppointmentDialog = ({
                                         updateAvailableEmployees(serviceId);
                                     }}
                                 >
-                                    {servicesArray.map(service => (
+                                    {filteredServices.map(service => (
                                         <MenuItem key={service.id} value={service.id}>
                                             {service.name}
                                         </MenuItem>
@@ -281,16 +282,6 @@ export const AppointmentDialog = ({
 
                         {/* Чекбоксы */}
                         <Stack direction="row" spacing={3}>
-                            <FormControlLabel
-                                control={
-                                    <Checkbox
-                                        size="small"
-                                        checked={!!newRecord.is_completed}
-                                        onChange={e => setNewRecord({ ...newRecord, is_completed: e.target.checked })}
-                                    />
-                                }
-                                label="Завершено"
-                            />
                             <FormControlLabel
                                 control={
                                     <Checkbox

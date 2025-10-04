@@ -38,6 +38,7 @@ export const useAppointmentData = (employees, clients, services) => {
     const [newClient, setNewClient] = useState({ full_name: '', phone: '', email: '' });
     const [availableEmployees, setAvailableEmployees] = useState([]);
     const [serviceQualifications, setServiceQualifications] = useState([]);
+    const [qualificationsCache, setQualificationsCache] = useState({}); // ДОБАВЛЕНО: кэш
     const [servicePrice, setServicePrice] = useState(null);
     
     // Состояния умного поиска
