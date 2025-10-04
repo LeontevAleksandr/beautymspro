@@ -9,13 +9,13 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 
 // Импортируем компоненты разделов
 import APhome from './APhome';
-import APappointment from './APappointment';
-import APclients from './APclients';
-import APemployee from './APemployee';
-import APservice from './APservice';
-import APanalytic from './APanalytic';
-import APspecialization from './APspecialization';
-import APschedule from './APschedule';
+import APappointment from './APappointment/index';
+import APclients from './APclients/index';
+import APemployee from './APemployee/index';
+import APservice from './APservice/index';
+import APanalytic from './APanalytic/index';
+import APspecialization from './APspecialization/index';
+import APschedule from './APschedule/index';
 
 function AdminPanel({ records }) {
     // Все useState идут в начале компонента
