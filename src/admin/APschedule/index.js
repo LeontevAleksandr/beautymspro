@@ -18,31 +18,26 @@ import ScheduleTable from './components/ScheduleTable';
 import TimeDialog from './components/TimeDialog';
 import AutoFillDialog from './components/AutoFillDialog';
 import NotificationSnackbar from './components/NotificationSnackbar';
+import LoadingSpinner from './components/LoadingSpinner';
 
 // Utils
 import { getEmployeeName, formatTimeRange } from './utils/helpers';
 import { INITIAL_WORK_HOURS } from './utils/constants';
 
 function APschedule() {
-    // Snackbar
     const { snackbar, showSnackbar, handleClose } = useSnackbar();
-
-    // Employees
     const { employees } = useEmployees(showSnackbar);
-
-    // Schedules
     const { 
         schedules, 
         currentDate, 
         setCurrentDate,
+        loading,
         loadSchedules, 
         deleteWorkingDay,
         getSchedule
     } = useSchedules(showSnackbar);
 
-    // Schedule Exceptions
     const { 
-        scheduleExceptions,
         newException,
         loadAllExceptions,
         loadExceptionsBySchedule,
@@ -51,7 +46,6 @@ function APschedule() {
         validateNewException
     } = useScheduleExceptions(showSnackbar);
 
-    // Week Navigation
     const {
         getDaysInWeek,
         goToPreviousWeek,
@@ -59,7 +53,6 @@ function APschedule() {
         goToCurrentWeek
     } = useWeekNavigation(currentDate, setCurrentDate);
 
-    // Time Dialog
     const {
         timeDialog,
         openDialog: openTimeDialog,
@@ -69,20 +62,19 @@ function APschedule() {
         updateDialogField
     } = useTimeDialog(getSchedule, loadExceptionsBySchedule);
 
-    // Save Schedule
     const { saveTimeDialog } = useSaveSchedule(schedules, showSnackbar);
 
-    // Auto Fill Dialog
     const {
         autoFillDialog,
         openDialog: openAutoFillDialog,
         closeDialog: closeAutoFillDialog,
         handleChange: handleAutoFillChange,
+        handleToggleMode,
+        handleToggleDays,
         handleDateRangeSelect,
         saveAutoFill
     } = useAutoFillDialog(schedules, [], INITIAL_WORK_HOURS, showSnackbar);
 
-    // Handlers
     const handleSaveTimeDialog = async () => {
         await saveTimeDialog(timeDialog, () => {
             loadSchedules();
@@ -126,19 +118,25 @@ function APschedule() {
         });
     };
 
+    if (loading) {
+        return (
+            <Box sx={{ p: 3, backgroundColor: '#fafafa', minHeight: '100vh' }}>
+                <LoadingSpinner />
+            </Box>
+        );
+    }
+
     return (
         <Box sx={{ 
             p: 3, 
             backgroundColor: '#fafafa',
             minHeight: '100vh'
         }}>
-            {/* Заголовок */}
             <ScheduleHeader
                 employeeCount={employees.length}
                 onAutoFillClick={openAutoFillDialog}
             />
 
-            {/* Навигация по неделям */}
             <WeekNavigation
                 currentDate={currentDate}
                 onPreviousWeek={goToPreviousWeek}
@@ -146,7 +144,6 @@ function APschedule() {
                 onCurrentWeek={goToCurrentWeek}
             />
 
-            {/* Таблица графика */}
             <ScheduleTable
                 employees={employees}
                 daysInWeek={getDaysInWeek()}
@@ -156,7 +153,6 @@ function APschedule() {
                 onDeleteDay={handleDeleteDay}
             />
 
-            {/* Диалог редактирования времени */}
             <TimeDialog
                 open={timeDialog.open}
                 isEdit={timeDialog.isEdit}
@@ -175,7 +171,6 @@ function APschedule() {
                 onAddException={handleAddException}
             />
 
-            {/* Диалог автозаполнения */}
             <AutoFillDialog
                 open={autoFillDialog.open}
                 formula={autoFillDialog.formula}
@@ -185,15 +180,18 @@ function APschedule() {
                 selectedRange={autoFillDialog.selectedRange}
                 employees={employees}
                 selectedEmployees={autoFillDialog.employees}
+                useCustom={autoFillDialog.useCustom}
+                selectedDays={autoFillDialog.selectedDays}
                 onClose={closeAutoFillDialog}
                 onSave={handleSaveAutoFill}
                 onFormulaChange={(value) => handleAutoFillChange('formula', value)}
+                onToggleMode={handleToggleMode}
+                onToggleDays={handleToggleDays}
                 onWorkHoursChange={handleWorkHoursChange}
                 onDateRangeSelect={handleDateRangeSelect}
                 onEmployeesChange={(value) => handleAutoFillChange('employees', value)}
             />
 
-            {/* Уведомления */}
             <NotificationSnackbar
                 open={snackbar.open}
                 message={snackbar.message}

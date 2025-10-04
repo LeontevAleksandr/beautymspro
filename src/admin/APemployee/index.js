@@ -8,6 +8,7 @@ import PageHeader from './components/PageHeader';
 import EmployeesTable from './components/EmployeesTable';
 import EmployeeDialog from './components/EmployeeDialog';
 import NotificationSnackbar from './components/NotificationSnackbar';
+import LoadingSpinner from './components/LoadingSpinner';
 
 function APemployee() {
   // Хук уведомлений
@@ -52,6 +53,19 @@ function APemployee() {
     selectedEmployee,
     changePassword
   );
+
+  // Показываем загрузку
+  if (loading) {
+    return (
+      <Box sx={{ 
+        p: 3, 
+        backgroundColor: '#fafafa',
+        minHeight: '100vh'
+      }}>
+        <LoadingSpinner />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ 

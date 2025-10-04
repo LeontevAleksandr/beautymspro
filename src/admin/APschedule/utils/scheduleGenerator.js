@@ -1,4 +1,4 @@
-import { format, addDays, isSameDay } from 'date-fns';
+import { format, addDays, isSameDay, getDay } from 'date-fns';
 
 // Генерация графика по формуле работы/отдыха
 export const generateScheduleByFormula = (
@@ -9,33 +9,25 @@ export const generateScheduleByFormula = (
     customWorkHours,
     existingSchedules
 ) => {
-    // Разбираем формулу на рабочие и выходные дни
     const [workDays, restDays] = formula.split('/').map(Number);
     const totalCycleDays = workDays + restDays;
-    
-    // Создаем массив для хранения сгенерированных дат
     const generatedSchedules = [];
     
-    // Для каждого сотрудника генерируем график
     for (const employeeId of employeeIds) {
         let currentDate = new Date(startDate);
         let dayCounter = 0;
         
-        // Генерируем график в пределах выбранного диапазона дат
         while (currentDate <= endDate) {
-            // Определяем, является ли текущий день рабочим по формуле
             const cyclePosition = dayCounter % totalCycleDays;
             const isWorkDay = cyclePosition < workDays;
             
             if (isWorkDay) {
-                // Проверяем, существует ли уже запись для этого сотрудника и даты
                 const existingSchedule = existingSchedules.find(s => 
                     s.employee_id === employeeId && 
                     isSameDay(new Date(s.date), currentDate)
                 );
                 
                 if (!existingSchedule) {
-                    // Если записи нет, создаем новую
                     generatedSchedules.push({
                         employee_id: employeeId,
                         date: format(currentDate, 'yyyy-MM-dd'),
@@ -45,9 +37,48 @@ export const generateScheduleByFormula = (
                 }
             }
             
-            // Переходим к следующему дню
             currentDate = addDays(currentDate, 1);
             dayCounter++;
+        }
+    }
+    
+    return generatedSchedules;
+};
+
+// Генерация графика по выбранным дням недели
+export const generateScheduleByWeekdays = (
+    startDate,
+    endDate,
+    employeeIds,
+    customWorkHours,
+    selectedDays,
+    existingSchedules
+) => {
+    const generatedSchedules = [];
+    
+    for (const employeeId of employeeIds) {
+        let currentDate = new Date(startDate);
+        
+        while (currentDate <= endDate) {
+            const dayOfWeek = getDay(currentDate);
+            
+            if (selectedDays.includes(dayOfWeek)) {
+                const existingSchedule = existingSchedules.find(s => 
+                    s.employee_id === employeeId && 
+                    isSameDay(new Date(s.date), currentDate)
+                );
+                
+                if (!existingSchedule) {
+                    generatedSchedules.push({
+                        employee_id: employeeId,
+                        date: format(currentDate, 'yyyy-MM-dd'),
+                        start_time: format(customWorkHours.start_time, 'HH:mm:ss'),
+                        end_time: format(customWorkHours.end_time, 'HH:mm:ss')
+                    });
+                }
+            }
+            
+            currentDate = addDays(currentDate, 1);
         }
     }
     

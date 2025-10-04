@@ -11,7 +11,7 @@ export const useEmployeesData = (showSnackbar) => {
   const [specializations, setSpecializations] = useState([]);
   const [qualifications, setQualifications] = useState([]);
   const [groupedEmployees, setGroupedEmployees] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // Загрузка сотрудников
   const loadEmployees = async () => {
@@ -49,9 +49,20 @@ export const useEmployeesData = (showSnackbar) => {
 
   // Загрузка всех данных при монтировании
   useEffect(() => {
-    loadEmployees();
-    loadSpecializations();
-    loadQualifications();
+    const loadAllData = async () => {
+      setLoading(true);
+      try {
+        await Promise.all([
+          loadEmployees(),
+          loadSpecializations(),
+          loadQualifications()
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadAllData();
   }, []);
 
   // Группировка сотрудников при изменении данных

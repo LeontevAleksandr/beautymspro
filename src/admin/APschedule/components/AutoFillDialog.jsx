@@ -7,11 +7,11 @@ import {
     Button,
     Box,
     Stack,
-    Divider
+    Divider,
+    Typography
 } from '@mui/material';
 import { Schedule } from '@mui/icons-material';
 import FormulaSelector from './FormulaSelector';
-import WorkHoursSelector from './WorkHoursSelector';
 import DateRangeInfo from './DateRangeInfo';
 import DateRangePicker from './DateRangePicker';
 import EmployeeSelector from './EmployeeSelector';
@@ -25,9 +25,13 @@ const AutoFillDialog = ({
     selectedRange,
     employees,
     selectedEmployees,
+    useCustom,
+    selectedDays,
     onClose,
     onSave,
     onFormulaChange,
+    onToggleMode,
+    onToggleDays,
     onWorkHoursChange,
     onDateRangeSelect,
     onEmployeesChange
@@ -36,7 +40,7 @@ const AutoFillDialog = ({
         <Dialog 
             open={open} 
             onClose={onClose}
-            maxWidth="md"
+            maxWidth="sm"
             fullWidth
             PaperProps={{
                 sx: {
@@ -63,42 +67,47 @@ const AutoFillDialog = ({
             <DialogContent sx={{ pt: 3, pb: 2, backgroundColor: '#fafafa' }}>
                 <Box sx={{ mt: 1 }}>
                     <Stack spacing={2.5}>
-                        {/* Формула графика */}
                         <FormulaSelector
                             value={formula}
                             onChange={onFormulaChange}
+                            useCustom={useCustom}
+                            onToggleMode={onToggleMode}
+                            selectedDays={selectedDays}
+                            onToggleDays={onToggleDays}
                         />
                         
                         <Divider sx={{ my: 1 }} />
                         
-                        {/* Рабочие часы */}
-                        <WorkHoursSelector
-                            startTime={workHours.start_time}
-                            endTime={workHours.end_time}
-                            onStartChange={(value) => onWorkHoursChange('start_time', value)}
-                            onEndChange={(value) => onWorkHoursChange('end_time', value)}
-                        />
-                        
-                        <Divider sx={{ my: 1 }} />
-                        
-                        {/* Диапазон дат */}
                         <Box>
+                            <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                    color: '#424242',
+                                    fontWeight: 500,
+                                    mb: 1
+                                }}
+                            >
+                                Выберите диапазон дат и рабочие часы:
+                            </Typography>
+                            
                             <DateRangeInfo
                                 startDate={startDate}
                                 endDate={endDate}
-                                selectedRange={selectedRange}
+                                selectingEnd={selectedRange}
                             />
                             
                             <DateRangePicker
                                 startDate={startDate}
                                 endDate={endDate}
                                 onChange={onDateRangeSelect}
+                                selectingEnd={selectedRange}
+                                workHours={workHours}
+                                onWorkHoursChange={onWorkHoursChange}
                             />
                         </Box>
                         
                         <Divider sx={{ my: 1 }} />
                         
-                        {/* Выбор сотрудников */}
                         <EmployeeSelector
                             employees={employees}
                             selectedEmployees={selectedEmployees}

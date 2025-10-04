@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { INITIAL_AUTO_FILL_DIALOG } from '../utils/constants';
-import { generateScheduleByFormula } from '../utils/scheduleGenerator';
+import { generateScheduleByFormula, generateScheduleByWeekdays } from '../utils/scheduleGenerator';
 import { bulkCreateSchedules } from '../services/api';
 
 export const useAutoFillDialog = (
@@ -9,9 +9,12 @@ export const useAutoFillDialog = (
     workHours, 
     showSnackbar
 ) => {
-    const [autoFillDialog, setAutoFillDialog] = useState(INITIAL_AUTO_FILL_DIALOG);
+    const [autoFillDialog, setAutoFillDialog] = useState({
+        ...INITIAL_AUTO_FILL_DIALOG,
+        useCustom: false,
+        selectedDays: [1, 2, 3, 4, 5]
+    });
 
-    // Открытие диалога
     const openDialog = () => {
         setAutoFillDialog({
             open: true,
@@ -23,16 +26,20 @@ export const useAutoFillDialog = (
             workHours: {
                 start_time: workHours.start_time,
                 end_time: workHours.end_time
-            }
+            },
+            useCustom: false,
+            selectedDays: [1, 2, 3, 4, 5]
         });
     };
 
-    // Закрытие диалога
     const closeDialog = () => {
-        setAutoFillDialog(INITIAL_AUTO_FILL_DIALOG);
+        setAutoFillDialog({
+            ...INITIAL_AUTO_FILL_DIALOG,
+            useCustom: false,
+            selectedDays: [1, 2, 3, 4, 5]
+        });
     };
 
-    // Обработка изменений полей
     const handleChange = (name, value) => {
         setAutoFillDialog(prev => ({
             ...prev,
@@ -40,10 +47,24 @@ export const useAutoFillDialog = (
         }));
     };
 
-    // Обработка выбора диапазона дат
+    const handleToggleMode = (useCustom) => {
+        setAutoFillDialog(prev => ({
+            ...prev,
+            useCustom
+        }));
+    };
+
+    const handleToggleDays = (dayId) => {
+        setAutoFillDialog(prev => ({
+            ...prev,
+            selectedDays: prev.selectedDays.includes(dayId)
+                ? prev.selectedDays.filter(id => id !== dayId)
+                : [...prev.selectedDays, dayId]
+        }));
+    };
+
     const handleDateRangeSelect = (date) => {
         if (!autoFillDialog.selectedRange) {
-            // Устанавливаем начальную дату
             setAutoFillDialog(prev => ({
                 ...prev,
                 startDate: date,
@@ -51,7 +72,6 @@ export const useAutoFillDialog = (
                 selectedRange: true
             }));
         } else {
-            // Устанавливаем конечную дату
             const endDate = date < autoFillDialog.startDate ? autoFillDialog.startDate : date;
             setAutoFillDialog(prev => ({
                 ...prev,
@@ -61,24 +81,22 @@ export const useAutoFillDialog = (
         }
     };
 
-    // Сохранение автозаполненного графика
     const saveAutoFill = async (onSuccess) => {
-        const { formula, startDate, endDate, employees, workHours: customWorkHours } = autoFillDialog;
+        const { formula, startDate, endDate, employees, workHours: customWorkHours, useCustom, selectedDays } = autoFillDialog;
 
         if (employees.length === 0) {
             showSnackbar('Выберите хотя бы одного сотрудника', 'warning');
             return;
         }
 
-        // Генерируем график по формуле
-        const generatedSchedules = generateScheduleByFormula(
-            formula, 
-            startDate, 
-            endDate, 
-            employees, 
-            customWorkHours,
-            schedules
-        );
+        if (useCustom && selectedDays.length === 0) {
+            showSnackbar('Выберите хотя бы один день недели', 'warning');
+            return;
+        }
+
+        const generatedSchedules = useCustom
+            ? generateScheduleByWeekdays(startDate, endDate, employees, customWorkHours, selectedDays, schedules)
+            : generateScheduleByFormula(formula, startDate, endDate, employees, customWorkHours, schedules);
 
         if (generatedSchedules.length === 0) {
             showSnackbar('Нет новых дат для добавления в график', 'info');
@@ -88,10 +106,7 @@ export const useAutoFillDialog = (
 
         try {
             await bulkCreateSchedules(generatedSchedules);
-            showSnackbar(
-                `Успешно добавлено ${generatedSchedules.length} рабочих дней`, 
-                'success'
-            );
+            showSnackbar(`Успешно добавлено ${generatedSchedules.length} рабочих дней`, 'success');
             closeDialog();
             if (onSuccess) onSuccess();
         } catch (error) {
@@ -104,6 +119,8 @@ export const useAutoFillDialog = (
         openDialog,
         closeDialog,
         handleChange,
+        handleToggleMode,
+        handleToggleDays,
         handleDateRangeSelect,
         saveAutoFill
     };

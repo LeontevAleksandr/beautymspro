@@ -9,17 +9,21 @@ import { getScheduleForDay } from '../utils/helpers';
 export const useSchedules = (showSnackbar) => {
     const [schedules, setSchedules] = useState([]);
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         loadSchedules();
     }, []);
 
     const loadSchedules = async () => {
+        setLoading(true);
         try {
             const data = await apiFetchSchedules();
             setSchedules(data);
         } catch (error) {
             showSnackbar(error.message, 'error');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -49,6 +53,7 @@ export const useSchedules = (showSnackbar) => {
         schedules,
         currentDate,
         setCurrentDate,
+        loading,
         loadSchedules,
         deleteWorkingDay,
         getSchedule
