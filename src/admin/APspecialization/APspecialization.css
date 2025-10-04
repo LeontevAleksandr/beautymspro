@@ -1,0 +1,41 @@
+/* Дополнительные стили для плавных переходов */
+.specialization-item,
+.qualification-item {
+  transition: background-color 0.2s ease;
+}
+
+/* Улучшенные hover эффекты для списков */
+.qualification-item:hover {
+  background-color: #f5f7fa;
+}
+
+/* Стили для drag-and-drop (если будут добавлены в будущем) */
+.draggable-item {
+  cursor: grab;
+  transition: all 0.2s ease;
+}
+
+.draggable-item:active {
+  cursor: grabbing;
+}
+
+.draggable-item.dragging {
+  opacity: 0.5;
+}
+
+/* Анимация появления элементов */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Применяется к новым элементам через JS при необходимости */
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
