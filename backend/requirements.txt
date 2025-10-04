@@ -14,5 +14,6 @@ pytz==2024.2
 colorlog==6.8.2
 
 Flask
+flask-cors
 
 sqlalchemy
