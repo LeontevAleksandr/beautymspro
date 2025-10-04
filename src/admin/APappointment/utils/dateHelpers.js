@@ -1,5 +1,5 @@
 import { format, differenceInDays } from 'date-fns';
-import { TIME_PREFERENCES, SLOT_DURATION } from './constants';
+import { TIME_PREFERENCES, SLOT_DURATION } from './constants.js';
 
 // ==================== УТИЛИТАРНЫЕ ФУНКЦИИ ====================
 export const formatTimeSlot = (date, timeString) => 

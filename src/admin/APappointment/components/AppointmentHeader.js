@@ -9,7 +9,7 @@ import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import TodayIcon from '@mui/icons-material/Today';
 import AddIcon from '@mui/icons-material/Add';
-import { INITIAL_RECORD_STATE } from '../utils/constants';
+import { INITIAL_RECORD_STATE } from '../utils/constants.js';
 
 // ==================== КОМПОНЕНТ ЗАГОЛОВКА ====================
 export const AppointmentHeader = ({

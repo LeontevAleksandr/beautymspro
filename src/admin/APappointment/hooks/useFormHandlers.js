@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { fetchServiceQualifications } from '../services/api';
+import { fetchServiceQualifications } from '../services/api.js';
 
 // ==================== ОБРАБОТЧИКИ ФОРМ ====================
 export const useFormHandlers = ({

@@ -9,7 +9,7 @@ import {
     SLOT_DURATION, 
     TABLE_ROW_HEIGHT, 
     RESIZE_HANDLE_HEIGHT 
-} from '../utils/constants';
+} from '../utils/constants.js';
 import { getNotificationForAppointment, getNotificationIcon } from '../utils/dataHelpers.js';
 
 // ==================== КОМПОНЕНТ БЛОКА ЗАПИСИ ====================

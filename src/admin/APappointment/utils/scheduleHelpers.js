@@ -1,6 +1,6 @@
 import { format, addMinutes, isWithinInterval } from 'date-fns';
-import { formatTimeSlot } from './dateHelpers';
-import { SLOT_DURATION } from './constants';
+import { formatTimeSlot } from './dateHelpers.js';
+import { SLOT_DURATION } from './constants.js';
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 export const generateTimeSlots = (schedules, selectedDate) => {

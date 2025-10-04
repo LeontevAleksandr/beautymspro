@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { AppointmentCell } from '../components/AppointmentCell';
+import { AppointmentCell } from '../components/AppointmentCell.js';
 
 // ==================== ХУКИ ДЛЯ РЕНДЕРИНГА ====================
 export const useRenderHelpers = ({

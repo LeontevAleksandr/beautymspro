@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { format } from 'date-fns';
-import { createNotification } from '../services/notificationApi';
-import { formatTimeSlot } from '../utils/dateHelpers';
-import { INITIAL_RECORD_STATE } from '../utils/constants';
+import { createNotification } from '../services/notificationApi.js';
+import { formatTimeSlot } from '../utils/dateHelpers.js';
+import { INITIAL_RECORD_STATE } from '../utils/constants.js';
 
 // ==================== CRUD ОБРАБОТЧИКИ ====================
 export const useCrudHandlers = ({

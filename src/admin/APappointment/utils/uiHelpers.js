@@ -1,4 +1,4 @@
-import { INITIAL_RECORD_STATE } from './constants';
+import { INITIAL_RECORD_STATE } from './constants.js';
 
 // ==================== UI УТИЛИТЫ ====================
 export const createShowSnackbar = (setSnackbar) => {

@@ -10,6 +10,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 // Импортируем компоненты разделов
 import APhome from './APhome';
 import APappointment from './APappointment/index';
+//import APappointment from './OLD/OLD_APappointment';
 import APclients from './APclients/index';
 import APemployee from './APemployee/index';
 import APservice from './APservice/index';

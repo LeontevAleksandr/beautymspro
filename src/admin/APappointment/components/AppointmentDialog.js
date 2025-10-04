@@ -7,8 +7,9 @@ import {
 } from '@mui/material';
 import { format } from 'date-fns';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import { STATUS_LABELS, REMINDER_OPTIONS } from '../utils/constants';
-import { getClientName, getServiceName } from '../utils/dataHelpers';
+import { STATUS_LABELS, REMINDER_OPTIONS } from '../utils/constants.js';
+import { getClientName, getServiceName } from '../utils/dataHelpers.js';
+import { ClientSelector } from './ClientSelector.js';
 
 // ==================== ПОЛНЫЙ КОМПОНЕНТ ДИАЛОГА ЗАПИСИ ====================
 export const AppointmentDialog = ({
@@ -26,6 +27,7 @@ export const AppointmentDialog = ({
     clientsArray,
     servicesArray,
     availableEmployees,
+    appointments, // ДОБАВЛЕНО для ClientSelector
     newRecord,
     setNewRecord,
     addNewClient,
@@ -88,33 +90,34 @@ export const AppointmentDialog = ({
             <form onSubmit={handleSubmit}>
                 <DialogContent sx={{ pt: 3 }}>
                     <Stack spacing={3}>
-                        {/* Клиент */}
+                        {/* Клиент - НОВЫЙ СЕЛЕКТОР */}
                         <Box>
-                            <FormControl fullWidth size="small">
-                                <InputLabel>Клиент</InputLabel>
-                                <Select
-                                    value={addNewClient ? 'new' : (newRecord.client_id || '')}
-                                    onChange={(e) => {
-                                        if (e.target.value === 'new') {
-                                            setAddNewClient(true);
-                                            setNewRecord(prev => ({ ...prev, client_id: '' }));
-                                        } else {
-                                            setAddNewClient(false);
-                                            setNewRecord(prev => ({ ...prev, client_id: e.target.value }));
-                                        }
-                                    }}
-                                >
-                                    {clientsArray.map(client => (
-                                        <MenuItem key={client.id} value={client.id}>
-                                            {client.full_name}
-                                        </MenuItem>
-                                    ))}
-                                    <MenuItem value="new">+ Добавить нового клиента</MenuItem>
-                                </Select>
-                            </FormControl>
-                            
-                            {addNewClient && (
-                                <Paper sx={{ p: 2, mt: 2, backgroundColor: '#f8f9fa' }}>
+                            {!addNewClient ? (
+                                <Stack spacing={1}>
+                                    <ClientSelector
+                                        clients={clientsArray}
+                                        value={newRecord.client_id}
+                                        onChange={(clientId) => {
+                                            setNewRecord(prev => ({ ...prev, client_id: clientId }));
+                                        }}
+                                        appointments={appointments}
+                                    />
+                                    <Button
+                                        size="small"
+                                        onClick={() => setAddNewClient(true)}
+                                        sx={{ 
+                                            textTransform: 'none',
+                                            alignSelf: 'flex-start'
+                                        }}
+                                    >
+                                        + Добавить нового клиента
+                                    </Button>
+                                </Stack>
+                            ) : (
+                                <Paper sx={{ p: 2, backgroundColor: '#f8f9fa' }}>
+                                    <Typography variant="subtitle2" fontWeight={500} sx={{ mb: 2 }}>
+                                        Новый клиент
+                                    </Typography>
                                     <Stack spacing={2}>
                                         <TextField
                                             label="ФИО"
@@ -148,15 +151,26 @@ export const AppointmentDialog = ({
                                                 })}
                                             />
                                         </Stack>
-                                        <Box sx={{ textAlign: 'right' }}>
+                                        <Stack direction="row" spacing={1} justifyContent="flex-end">
+                                            <Button 
+                                                size="small"
+                                                onClick={() => {
+                                                    setAddNewClient(false);
+                                                    setNewClient({ full_name: '', phone: '', email: '' });
+                                                }}
+                                                sx={{ textTransform: 'none' }}
+                                            >
+                                                Отмена
+                                            </Button>
                                             <Button 
                                                 size="small"
                                                 variant="contained" 
                                                 onClick={handleAddClient}
+                                                sx={{ textTransform: 'none' }}
                                             >
                                                 Добавить
                                             </Button>
-                                        </Box>
+                                        </Stack>
                                     </Stack>
                                 </Paper>
                             )}

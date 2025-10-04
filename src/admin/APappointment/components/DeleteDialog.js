@@ -1,6 +1,6 @@
 import React from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Typography, Button } from '@mui/material';
-import { getClientName, getServiceName } from '../utils/dataHelpers';
+import { getClientName, getServiceName } from '../utils/dataHelpers.js';
 
 // ==================== КОМПОНЕНТ ДИАЛОГА УДАЛЕНИЯ ====================
 export const DeleteDialog = ({

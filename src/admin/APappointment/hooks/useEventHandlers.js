@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { getAppointmentForSlot, isEmployeeWorking } from '../utils/scheduleHelpers';
+import { getAppointmentForSlot, isEmployeeWorking } from '../utils/scheduleHelpers.js';
 
 // ==================== ОБРАБОТЧИКИ СОБЫТИЙ ====================
 export const useEventHandlers = ({

@@ -6,7 +6,9 @@ import {
     fetchAppointmentsForDate,
     fetchNotifications,
     fetchServiceQualifications
-} from '../services/api';
+} from '../services/api.js';
+import { generateTimeSlots } from '../utils/scheduleHelpers.js';
+import { createShowSnackbar, createResetForm } from '../utils/uiHelpers.js';
 import { INITIAL_RECORD_STATE, INITIAL_SMART_SEARCH, TABLE_ROW_HEIGHT } from '../utils/constants.js';
 
 export const useAppointmentData = (employees, clients, services) => {
@@ -54,6 +56,21 @@ export const useAppointmentData = (employees, clients, services) => {
     // ==================== МЕМОИЗИРОВАННЫЕ ЗНАЧЕНИЯ ====================
     const clientsArray = useMemo(() => Array.isArray(clients) ? clients : [], [clients]);
     const servicesArray = useMemo(() => Array.isArray(services) ? services : [], [services]);
+
+    // Создаем утилитарные функции
+    const showSnackbar = useCallback(createShowSnackbar(setSnackbar), []);
+    
+    const resetForm = useCallback(createResetForm({
+        setNewRecord,
+        setServerError,
+        setConflictDetails,
+        setEditMode,
+        setCurrentAppointment,
+        setAvailableEmployees,
+        setServicePrice,
+        setAddNewClient,
+        setNewClient
+    }), []);
 
     // ==================== ФУНКЦИИ ЗАГРУЗКИ ДАННЫХ ====================
     const loadScheduleExceptions = useCallback(async () => {
@@ -116,6 +133,12 @@ export const useAppointmentData = (employees, clients, services) => {
             return [];
         }
     }, []);
+
+    // Добавляем функцию генерации временных слотов
+    const generateTimeSlotsForDate = useCallback((schedules) => {
+        const slots = generateTimeSlots(schedules, selectedDate);
+        setTimeSlots(slots);
+    }, [selectedDate]);
 
     // ==================== ЭФФЕКТЫ ====================
     useEffect(() => {
@@ -215,6 +238,11 @@ export const useAppointmentData = (employees, clients, services) => {
         loadSchedulesForDate,
         loadAppointmentsForDate,
         loadNotifications,
-        loadServiceQualifications
+        loadServiceQualifications,
+        generateTimeSlotsForDate,
+        
+        // Утилитарные функции
+        showSnackbar,
+        resetForm
     };
 };

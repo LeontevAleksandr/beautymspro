@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { format } from 'date-fns';
-import { SLOT_DURATION, TABLE_ROW_HEIGHT } from '../utils/constants';
+import { SLOT_DURATION, TABLE_ROW_HEIGHT } from '../utils/constants.js';
 
 // ==================== ОБРАБОТЧИК ИЗМЕНЕНИЯ РАЗМЕРА ====================
 export const useResizeHandler = ({

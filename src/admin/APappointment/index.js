@@ -2,24 +2,24 @@ import React from 'react';
 import { Box, Snackbar, Alert } from '@mui/material';
 
 // Хуки
-import { useAppointmentData } from './hooks/useAppointmentData';
-import { useSmartSearch } from './hooks/useSmartSearch';
-import { useEventHandlers } from './hooks/useEventHandlers';
-import { useResizeHandler } from './hooks/useResizeHandler';
-import { useFormHandlers } from './hooks/useFormHandlers';
-import { useCrudHandlers } from './hooks/useCrudHandlers';
-import { useRenderHelpers } from './hooks/useRenderHelpers';
+import { useAppointmentData } from './hooks/useAppointmentData.js';
+import { useSmartSearch } from './hooks/useSmartSearch.js';
+import { useEventHandlers } from './hooks/useEventHandlers.js';
+import { useResizeHandler } from './hooks/useResizeHandler.js';
+import { useFormHandlers } from './hooks/useFormHandlers.js';
+import { useCrudHandlers } from './hooks/useCrudHandlers.js';
+import { useRenderHelpers } from './hooks/useRenderHelpers.js';
 
 // Компоненты
-import { AppointmentHeader } from './components/AppointmentHeader';
-import { AppointmentTable } from './components/AppointmentTable';
-import { AppointmentDialog } from './components/AppointmentDialog';
-import { SmartSearchDialog } from './components/SmartSearchDialog';
-import { SearchResults } from './components/SearchResults';
-import { DeleteDialog } from './components/DeleteDialog';
+import { AppointmentHeader } from './components/AppointmentHeader.js';
+import { AppointmentTable } from './components/AppointmentTable.js';
+import { AppointmentDialog } from './components/AppointmentDialog.js';
+import { SmartSearchDialog } from './components/SmartSearchDialog.js';
+import { SearchResults } from './components/SearchResults.js';
+import { DeleteDialog } from './components/DeleteDialog.js';
 
 // Утилиты
-import { INITIAL_SMART_SEARCH } from './utils/constants';
+import { INITIAL_SMART_SEARCH } from './utils/constants.js';
 
 // ==================== ГЛАВНЫЙ КОМПОНЕНТ ====================
 function APappointment({ records, clients, setClients, employees, services }) {
@@ -89,7 +89,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
         conflictDetails,
         setConflictDetails,
 
-        // Функции загрузки
+        // Функции
         loadAppointmentsForDate,
         loadNotifications,
         showSnackbar,
@@ -242,6 +242,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
                 clientsArray={clientsArray}
                 servicesArray={servicesArray}
                 availableEmployees={availableEmployees}
+                appointments={appointments}
                 newRecord={newRecord}
                 setNewRecord={setNewRecord}
                 addNewClient={addNewClient}

@@ -2,7 +2,7 @@ import React from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, Divider, 
     Stack, Typography, Button, FormControl, InputLabel, 
-    Select, MenuItem, TextField, Box, Card, CardContent
+    Select, MenuItem, TextField, Box, Card, CardContent, Alert
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -10,7 +10,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { ru } from 'date-fns/locale';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import ScheduleIcon from '@mui/icons-material/Schedule';
-import { TIME_PREFERENCES } from '../utils/constants';
+import { TIME_PREFERENCES } from '../utils/constants.js';
 
 // ==================== КОМПОНЕНТ ДИАЛОГА УМНОГО ПОИСКА ====================
 export const SmartSearchDialog = ({

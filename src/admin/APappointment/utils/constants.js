@@ -1,3 +1,5 @@
+import { addDays } from 'date-fns';
+
 // ==================== КОНСТАНТЫ ====================
 export const STATUS_COLORS = {
     created: '#f8f9fa',
@@ -55,6 +57,3 @@ export const INITIAL_SMART_SEARCH = {
     timePreference: 'any',
     maxResults: 10
 };
-
-// Необходимо импортировать addDays из date-fns
-import { addDays } from 'date-fns';

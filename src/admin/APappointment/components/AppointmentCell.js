@@ -2,9 +2,9 @@ import React from 'react';
 import { Box, TableCell } from '@mui/material';
 import { format } from 'date-fns';
 import AddIcon from '@mui/icons-material/Add';
-import { TABLE_ROW_HEIGHT } from '../utils/constants';
+import { TABLE_ROW_HEIGHT } from '../utils/constants.js';
 import { getAppointmentForSlot, isEmployeeWorking } from '../utils/scheduleHelpers.js';
-import { AppointmentBlock } from './AppointmentBlock';
+import { AppointmentBlock } from './AppointmentBlock.js';
 
 // ==================== КОМПОНЕНТ ЯЧЕЙКИ ЗАПИСИ ====================
 export const AppointmentCell = ({ 

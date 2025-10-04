@@ -7,8 +7,8 @@ import {
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { calculateWorkloadChange } from '../utils/dateHelpers';
-import { WorkloadBar, OptimalityChip } from './VisualizationComponents';
+import { calculateWorkloadChange } from '../utils/dateHelpers.js';
+import { WorkloadBar, OptimalityChip } from './VisualizationComponents.js';
 
 // ==================== КОМПОНЕНТ РЕЗУЛЬТАТОВ ПОИСКА ====================
 export const SearchResults = ({

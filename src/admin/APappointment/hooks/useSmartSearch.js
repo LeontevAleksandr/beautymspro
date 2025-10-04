@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
 import { format } from 'date-fns';
 import { fetchEmployeeWorkload, fetchAvailableSlots } from '../services/smartSearchApi.js';
-import { fetchServiceQualifications } from '../services/api';
-import { calculateSlotOptimality } from '../utils/dateHelpers';
-import { INITIAL_RECORD_STATE } from '../utils/constants';
+import { fetchServiceQualifications } from '../services/api.js';
+import { calculateSlotOptimality } from '../utils/dateHelpers.js';
+import { INITIAL_RECORD_STATE } from '../utils/constants.js';
 
 export const useSmartSearch = ({
     smartSearch,
