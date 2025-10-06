@@ -94,6 +94,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
         // Функции загрузки
         loadAppointmentsForDate,
         loadNotifications,
+        loadServiceQualifications,
         showSnackbar,
         resetForm
     } = useAppointmentData(employees, clients, services);
@@ -186,11 +187,13 @@ function APappointment({ records, clients, setClients, employees, services }) {
         services,
         employees,
         serviceQualifications,
+        qualificationsCache,
         newRecord,
         setAvailableEmployees,
         setServicePrice,
         setNewRecord,
-        showSnackbar
+        showSnackbar,
+        loadServiceQualifications // ИСПРАВЛЕНО: передаем функцию
     });
 
     // ==================== ФИЛЬТРАЦИЯ УСЛУГ ПО МАСТЕРУ ====================

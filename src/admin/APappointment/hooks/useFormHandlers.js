@@ -14,10 +14,11 @@ export const useFormHandlers = ({
     loadServiceQualifications // ДОБАВЛЕНО: функция загрузки с кэшем
 }) => {
     const updateAvailableEmployees = useCallback(async (serviceId) => {
+        // ИСПРАВЛЕНО: Сброс при "Не выбрано"
         if (!serviceId) {
-            setAvailableEmployees([]);
+            setAvailableEmployees(employees); // Все мастера доступны
             setServicePrice(null);
-            setNewRecord(prev => ({ ...prev, custom_duration: '', final_price: '' }));
+            setNewRecord(prev => ({ ...prev, custom_duration: '', final_price: '', employee_id: '' }));
             return;
         }
 
@@ -25,7 +26,6 @@ export const useFormHandlers = ({
             const selectedService = services.find(s => s.id === serviceId);
             if (!selectedService) return;
 
-            // Сразу устанавливаем базовые значения услуги
             setServicePrice(selectedService.base_price);
             setNewRecord(prev => ({ 
                 ...prev, 
@@ -33,7 +33,6 @@ export const useFormHandlers = ({
                 final_price: selectedService.base_price 
             }));
 
-            // ИСПРАВЛЕНО: Используем loadServiceQualifications с кэшем
             const qualifications = await loadServiceQualifications(serviceId);
             
             const filtered = employees.filter(emp => {
@@ -47,6 +46,7 @@ export const useFormHandlers = ({
             
             if (newRecord.employee_id && !filtered.some(emp => emp.id === newRecord.employee_id)) {
                 showSnackbar('Выбранный мастер не может выполнить эту услугу', 'warning');
+                setNewRecord(prev => ({ ...prev, employee_id: '' }));
             }
         } catch (error) {
             console.error('Ошибка при обновлении списка мастеров:', error);

@@ -38,7 +38,6 @@ export const useCrudHandlers = ({
     const handleAddClick = useCallback((employeeId, timeSlot) => {
         const newAppointmentDateTime = formatTimeSlot(selectedDate, timeSlot);
         
-        // Находим выбранного мастера
         const selectedEmployee = employees.find(emp => emp.id === employeeId);
         
         setNewRecord({
@@ -48,10 +47,8 @@ export const useCrudHandlers = ({
             time: format(newAppointmentDateTime, 'HH:mm'),
         });
         
-        // Устанавливаем выбранного мастера в доступные
-        if (selectedEmployee) {
-            setAvailableEmployees([selectedEmployee]);
-        }
+        // ИСПРАВЛЕНО: Все сотрудники доступны, но один выбран
+        setAvailableEmployees(employees);
         
         setEditMode(false);
         setOpenDialog(true);

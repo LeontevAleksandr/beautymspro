@@ -26,9 +26,9 @@ export const AppointmentDialog = ({
     // Данные
     clientsArray,
     servicesArray,
-    filteredServices, // ДОБАВЛЕНО: отфильтрованные услуги по мастеру
+    filteredServices,
     availableEmployees,
-    appointments, // ДОБАВЛЕНО для ClientSelector
+    appointments,
     newRecord,
     setNewRecord,
     addNewClient,
@@ -91,7 +91,7 @@ export const AppointmentDialog = ({
             <form onSubmit={handleSubmit}>
                 <DialogContent sx={{ pt: 3 }}>
                     <Stack spacing={3}>
-                        {/* Клиент - НОВЫЙ СЕЛЕКТОР */}
+                        {/* Клиент */}
                         <Box>
                             {!addNewClient ? (
                                 <Stack spacing={1}>
@@ -189,6 +189,7 @@ export const AppointmentDialog = ({
                                         updateAvailableEmployees(serviceId);
                                     }}
                                 >
+                                    <MenuItem value="">Не выбрано</MenuItem>
                                     {filteredServices.map(service => (
                                         <MenuItem key={service.id} value={service.id}>
                                             {service.name}
@@ -204,10 +205,12 @@ export const AppointmentDialog = ({
                                     onChange={(e) => {
                                         const employeeId = e.target.value;
                                         setNewRecord(prev => ({ ...prev, employee_id: employeeId }));
-                                        updateServicePrice(newRecord.service_id, employeeId);
+                                        if (employeeId) {
+                                            updateServicePrice(newRecord.service_id, employeeId);
+                                        }
                                     }}
-                                    disabled={!newRecord.service_id}
                                 >
+                                    <MenuItem value="">Не выбрано</MenuItem>
                                     {availableEmployees.map(emp => (
                                         <MenuItem key={emp.id} value={emp.id}>
                                             {emp.full_name}
@@ -281,18 +284,16 @@ export const AppointmentDialog = ({
                         </FormControl>
 
                         {/* Чекбоксы */}
-                        <Stack direction="row" spacing={3}>
-                            <FormControlLabel
-                                control={
-                                    <Checkbox
-                                        size="small"
-                                        checked={!!newRecord.is_paid}
-                                        onChange={e => setNewRecord({ ...newRecord, is_paid: e.target.checked })}
-                                    />
-                                }
-                                label="Оплачено"
-                            />
-                        </Stack>
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    size="small"
+                                    checked={!!newRecord.is_paid}
+                                    onChange={e => setNewRecord({ ...newRecord, is_paid: e.target.checked })}
+                                />
+                            }
+                            label="Оплачено"
+                        />
 
                         {/* Напоминание */}
                         {!editMode && (
