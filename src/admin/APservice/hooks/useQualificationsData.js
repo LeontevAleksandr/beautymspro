@@ -11,7 +11,7 @@ export const useQualificationsData = () => {
   const [qualifications, setQualifications] = useState([]);
   const [availableQualifications, setAvailableQualifications] = useState([]);
   const [serviceQualifications, setServiceQualifications] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadQualifications();

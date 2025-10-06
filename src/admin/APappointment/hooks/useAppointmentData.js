@@ -21,6 +21,7 @@ export const useAppointmentData = (employees, clients, services) => {
     const [notifications, setNotifications] = useState([]);
     const [filteredEmployees, setFilteredEmployees] = useState([]);
     const [scheduleExceptions, setScheduleExceptions] = useState([]);
+    const [loading, setLoading] = useState(true);
 
     // Состояния диалогов
     const [openDialog, setOpenDialog] = useState(false);
@@ -36,9 +37,9 @@ export const useAppointmentData = (employees, clients, services) => {
     // Состояния формы
     const [addNewClient, setAddNewClient] = useState(false);
     const [newClient, setNewClient] = useState({ full_name: '', phone: '', email: '' });
-    const [availableEmployees, setAvailableEmployees] = useState([]);
+    const [availableEmployees, setAvailableEmployees] = useState(employees); // ИСПРАВЛЕНО: инициализация всеми
     const [serviceQualifications, setServiceQualifications] = useState([]);
-    const [qualificationsCache, setQualificationsCache] = useState({}); // ДОБАВЛЕНО: кэш
+    const [qualificationsCache, setQualificationsCache] = useState({});
     const [servicePrice, setServicePrice] = useState(null);
     
     // Состояния умного поиска
@@ -125,15 +126,23 @@ export const useAppointmentData = (employees, clients, services) => {
     }, []);
 
     const loadServiceQualifications = useCallback(async (serviceId) => {
+        // ДОБАВЛЕНО: Проверяем кэш
+        if (qualificationsCache[serviceId]) {
+            setServiceQualifications(qualificationsCache[serviceId]);
+            return qualificationsCache[serviceId];
+        }
+
         try {
             const data = await fetchServiceQualifications(serviceId);
             setServiceQualifications(data);
+            // ДОБАВЛЕНО: Сохраняем в кэш
+            setQualificationsCache(prev => ({ ...prev, [serviceId]: data }));
             return data;
         } catch (error) {
             console.error('Ошибка при получении квалификаций услуги:', error);
             return [];
         }
-    }, []);
+    }, [qualificationsCache]);
 
     // Добавляем функцию генерации временных слотов
     const generateTimeSlotsForDate = useCallback((schedules) => {
@@ -143,10 +152,21 @@ export const useAppointmentData = (employees, clients, services) => {
 
     // ==================== ЭФФЕКТЫ ====================
     useEffect(() => {
-        loadSchedulesForDate(selectedDate);
-        loadAppointmentsForDate(selectedDate);
-        loadScheduleExceptions();
-        loadNotifications();
+        const loadInitialData = async () => {
+            setLoading(true);
+            try {
+                await Promise.all([
+                    loadSchedulesForDate(selectedDate),
+                    loadAppointmentsForDate(selectedDate),
+                    loadScheduleExceptions(),
+                    loadNotifications()
+                ]);
+            } finally {
+                setLoading(false);
+            }
+        };
+        
+        loadInitialData();
     }, [selectedDate, loadSchedulesForDate, loadAppointmentsForDate, loadScheduleExceptions, loadNotifications]);
 
     // Пересчитываем размеры блоков после загрузки записей
@@ -182,6 +202,7 @@ export const useAppointmentData = (employees, clients, services) => {
         scheduleExceptions,
         clientsArray,
         servicesArray,
+        loading, // ДОБАВЛЕНО
 
         // Состояния диалогов
         openDialog,
@@ -209,6 +230,7 @@ export const useAppointmentData = (employees, clients, services) => {
         availableEmployees,
         setAvailableEmployees,
         serviceQualifications,
+        qualificationsCache, // ДОБАВЛЕНО: экспортируем кэш
         servicePrice,
         setServicePrice,
 

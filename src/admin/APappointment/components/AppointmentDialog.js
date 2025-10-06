@@ -94,7 +94,7 @@ export const AppointmentDialog = ({
                         {/* Клиент */}
                         <Box>
                             {!addNewClient ? (
-                                <Stack spacing={1}>
+                                <Box component="div" autoComplete="off">
                                     <ClientSelector
                                         clients={clientsArray}
                                         value={newRecord.client_id}
@@ -102,18 +102,27 @@ export const AppointmentDialog = ({
                                             setNewRecord(prev => ({ ...prev, client_id: clientId }));
                                         }}
                                         appointments={appointments}
-                                    />
-                                    <Button
-                                        size="small"
-                                        onClick={() => setAddNewClient(true)}
-                                        sx={{ 
-                                            textTransform: 'none',
-                                            alignSelf: 'flex-start'
+                                        onAddNew={(searchText) => {
+                                            setAddNewClient(true);
+                                            // Определяем тип введенных данных и автозаполняем
+                                            if (searchText) {
+                                                const isPhone = /^\d+$/.test(searchText);
+                                                const isEmail = /[a-zA-Z0-9]/.test(searchText) && searchText.includes('@');
+                                                const isCyrillic = /[а-яА-ЯёЁ]/.test(searchText);
+                                                
+                                                if (isPhone) {
+                                                    setNewClient({ full_name: '', phone: searchText, email: '' });
+                                                } else if (isEmail) {
+                                                    setNewClient({ full_name: '', phone: '', email: searchText });
+                                                } else if (isCyrillic) {
+                                                    setNewClient({ full_name: searchText, phone: '', email: '' });
+                                                } else {
+                                                    setNewClient({ full_name: searchText, phone: '', email: '' });
+                                                }
+                                            }
                                         }}
-                                    >
-                                        + Добавить нового клиента
-                                    </Button>
-                                </Stack>
+                                    />
+                                </Box>
                             ) : (
                                 <Paper sx={{ p: 2, backgroundColor: '#f8f9fa' }}>
                                     <Typography variant="subtitle2" fontWeight={500} sx={{ mb: 2 }}>

@@ -18,6 +18,7 @@ import { AppointmentDialog } from './components/AppointmentDialog.js';
 import { SmartSearchDialog } from './components/SmartSearchDialog.js';
 import { SearchResults } from './components/SearchResults.js';
 import { DeleteDialog } from './components/DeleteDialog.js';
+import { LoadingSpinner } from './components/LoadingSpinner.js';
 
 // Утилиты
 import { INITIAL_SMART_SEARCH } from './utils/constants.js';
@@ -38,6 +39,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
         scheduleExceptions,
         clientsArray,
         servicesArray,
+        loading, // ДОБАВЛЕНО
 
         // Состояния диалогов
         openDialog,
@@ -193,7 +195,7 @@ function APappointment({ records, clients, setClients, employees, services }) {
         setServicePrice,
         setNewRecord,
         showSnackbar,
-        loadServiceQualifications // ИСПРАВЛЕНО: передаем функцию
+        loadServiceQualifications
     });
 
     // ==================== ФИЛЬТРАЦИЯ УСЛУГ ПО МАСТЕРУ ====================
@@ -218,6 +220,16 @@ function APappointment({ records, clients, setClients, employees, services }) {
     });
 
     // ==================== ОСНОВНОЙ РЕНДЕР ====================
+    
+    // Показываем загрузку при первичной загрузке данных
+    if (loading) {
+        return (
+            <Box sx={{ p: 2, backgroundColor: '#fafafa', minHeight: '100vh' }}>
+                <LoadingSpinner />
+            </Box>
+        );
+    }
+    
     return (
         <Box sx={{ p: 2, backgroundColor: '#fafafa', minHeight: '100vh' }}>
             {/* Заголовок и панель управления */}
@@ -226,6 +238,8 @@ function APappointment({ records, clients, setClients, employees, services }) {
                 setSelectedDate={setSelectedDate}
                 setOpenDialog={setOpenDialog}
                 setNewRecord={setNewRecord}
+                setAvailableEmployees={setAvailableEmployees}
+                employees={employees}
             />
             
             {/* Таблица расписания */}

@@ -1,19 +1,20 @@
-import React from 'react';
-import { Autocomplete, TextField, Box, Typography, Stack, Chip } from '@mui/material';
+import React, { useState } from 'react';
+import { Autocomplete, TextField, Box, Typography, Stack, Chip, MenuItem } from '@mui/material';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import AddIcon from '@mui/icons-material/Add';
 
 export const ClientSelector = ({ 
     clients, 
     value, 
     onChange,
     appointments = [],
-    size = "small"
+    size = "small",
+    onAddNew // ДОБАВЛЕНО
 }) => {
-    // Находим клиента по ID
+    const [inputValue, setInputValue] = useState('');
     const selectedClient = value ? clients.find(c => c.id === value) : null;
 
-    // Подсчет визитов и последнего визита
     const getClientStats = (clientId) => {
         const clientApps = appointments.filter(app => app.client_id === clientId);
         const visits = clientApps.length;
@@ -26,21 +27,55 @@ export const ClientSelector = ({
     return (
         <Autocomplete
             value={selectedClient}
-            onChange={(event, newValue) => {
-                onChange(newValue ? newValue.id : '');
+            inputValue={inputValue}
+            onInputChange={(event, newInputValue) => {
+                setInputValue(newInputValue);
             }}
-            options={clients}
-            getOptionLabel={(option) => option.full_name || ''}
+            onChange={(event, newValue) => {
+                if (newValue && newValue.id === 'add-new') {
+                    onAddNew?.(inputValue);
+                    setInputValue('');
+                } else {
+                    onChange(newValue ? newValue.id : '');
+                }
+            }}
+            options={[
+                { id: 'add-new', full_name: 'Добавить нового клиента', isAddButton: true },
+                ...clients
+            ]}
+            getOptionLabel={(option) => option.isAddButton ? '' : (option.full_name || '')}
             filterOptions={(options, { inputValue }) => {
                 const searchTerm = inputValue.toLowerCase();
-                return options.filter(option => 
-                    option.full_name.toLowerCase().includes(searchTerm) ||
-                    option.phone?.toLowerCase().includes(searchTerm) ||
-                    option.email?.toLowerCase().includes(searchTerm)
-                );
+                const filtered = options.filter(option => {
+                    if (option.isAddButton) return true;
+                    return option.full_name?.toLowerCase().includes(searchTerm) ||
+                           option.phone?.toLowerCase().includes(searchTerm) ||
+                           option.email?.toLowerCase().includes(searchTerm);
+                });
+                return filtered;
             }}
-            renderOption={(props, client) => {
-                const { visits, lastVisit } = getClientStats(client.id);
+            renderOption={(props, option) => {
+                if (option.isAddButton) {
+                    return (
+                        <MenuItem
+                            {...props}
+                            sx={{
+                                color: '#1976d2',
+                                fontWeight: 500,
+                                borderBottom: '1px solid #e0e0e0',
+                                py: 1.5,
+                                '&:hover': {
+                                    backgroundColor: '#e3f2fd'
+                                }
+                            }}
+                        >
+                            <AddIcon sx={{ fontSize: 18, mr: 1 }} />
+                            {option.full_name}
+                        </MenuItem>
+                    );
+                }
+
+                const { visits, lastVisit } = getClientStats(option.id);
                 
                 return (
                     <Box 
@@ -56,17 +91,17 @@ export const ClientSelector = ({
                         }}
                     >
                         <Typography variant="body2" fontWeight={500} sx={{ mb: 0.5 }}>
-                            {client.full_name}
+                            {option.full_name}
                         </Typography>
                         <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
-                            {client.phone && (
+                            {option.phone && (
                                 <Typography variant="caption" color="text.secondary">
-                                    {client.phone}
+                                    {option.phone}
                                 </Typography>
                             )}
-                            {client.email && (
+                            {option.email && (
                                 <Typography variant="caption" color="text.secondary">
-                                    {client.email}
+                                    {option.email}
                                 </Typography>
                             )}
                         </Stack>

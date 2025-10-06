@@ -33,8 +33,7 @@ const PageHeader = ({
           Добавление и редактирование сотрудников салона
           {employeesCount > 0 && (
             <Box component="span" sx={{ ml: 2 }}>
-              • Всего сотрудников: {employeesCount} 
-              • Специализаций: {specializationsCount}
+              • Всего сотрудников: {employeesCount} • Специализаций: {specializationsCount}
             </Box>
           )}
         </Typography>

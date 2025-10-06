@@ -36,7 +36,7 @@ const APservice = () => {
     handleChange,
     handleQualificationPriceChange,
     handleEdit,
-    resetForm
+    resetForm    
   } = useServiceForm(
     loadQualificationsBySpecialization,
     loadServiceQualifications,

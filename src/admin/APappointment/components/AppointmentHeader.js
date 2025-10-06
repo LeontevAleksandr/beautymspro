@@ -16,7 +16,9 @@ export const AppointmentHeader = ({
     selectedDate,
     setSelectedDate,
     setOpenDialog,
-    setNewRecord
+    setNewRecord,
+    setAvailableEmployees, // ДОБАВЛЕНО
+    employees // ДОБАВЛЕНО
 }) => {
     const handlePrevDay = () => {
         const prevDay = new Date(selectedDate);
@@ -40,6 +42,7 @@ export const AppointmentHeader = ({
             ...INITIAL_RECORD_STATE,
             date: format(selectedDate, 'yyyy-MM-dd')
         });
+        setAvailableEmployees(employees); // ДОБАВЛЕНО: все мастера доступны
     };
 
     return (

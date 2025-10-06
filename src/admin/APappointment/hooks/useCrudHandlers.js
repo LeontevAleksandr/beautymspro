@@ -38,7 +38,7 @@ export const useCrudHandlers = ({
     const handleAddClick = useCallback((employeeId, timeSlot) => {
         const newAppointmentDateTime = formatTimeSlot(selectedDate, timeSlot);
         
-        const selectedEmployee = employees.find(emp => emp.id === employeeId);
+        //const selectedEmployee = employees.find(emp => emp.id === employeeId);
         
         setNewRecord({
             ...INITIAL_RECORD_STATE,

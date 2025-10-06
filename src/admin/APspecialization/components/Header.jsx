@@ -28,8 +28,7 @@ export const Header = ({ specializationsCount, qualificationsCount }) => {
           Настройка специализаций и уровней квалификации для сотрудников салона
           {specializationsCount > 0 && (
             <Box component="span" sx={{ ml: 2 }}>
-              • Всего специализаций: {specializationsCount} 
-              • Уровней квалификации: {qualificationsCount}
+              • Всего специализаций: {specializationsCount} • Уровней квалификации: {qualificationsCount}
             </Box>
           )}
         </Typography>
