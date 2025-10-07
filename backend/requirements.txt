@@ -17,3 +17,6 @@ Flask
 flask-cors
 
 sqlalchemy
+
+# db-driver
+psycopg2

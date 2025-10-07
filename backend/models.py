@@ -1,140 +1,185 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, BigInteger, Text, Date, Time, Table
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    BigInteger,
+    Text,
+    Date,
+    Time,
+    Table,
+)
 from sqlalchemy.orm import relationship
 from database import Base  # Убрана точка
 from datetime import datetime
 from sqlalchemy import Enum
 import enum
 
+
 class ClientStatus(Base):
-    __tablename__ = 'client_statuses'
+    __tablename__ = "client_statuses"
     id = Column(Integer, primary_key=True, index=True)
     status = Column(String, index=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    client_preferences = relationship("ClientPreferences", back_populates="client_status")
+    client_preferences = relationship(
+        "ClientPreferences", back_populates="client_status"
+    )
+
 
 class Qualification(Base):
-    __tablename__ = 'qualifications'
+    __tablename__ = "qualifications"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     priority = Column(Integer, unique=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     employees = relationship("Employee", back_populates="qualification")
-    specialization_qualifications = relationship("SpecializationQualificationPivot", back_populates="qualification")
-    service_qualifications = relationship("ServiceQualificationPivot", back_populates="qualification")
+    specialization_qualifications = relationship(
+        "SpecializationQualificationPivot", back_populates="qualification"
+    )
+    service_qualifications = relationship(
+        "ServiceQualificationPivot", back_populates="qualification"
+    )
+
 
 class Client(Base):
-    __tablename__ = 'clients'
+    __tablename__ = "clients"
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String, index=True)
     phone = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=True)
+    email = Column(String, unique=False, index=True, nullable=True)
     telegram_chat_id = Column(BigInteger, unique=True, nullable=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     appointments = relationship("Appointment", back_populates="client")
     preferences = relationship("ClientPreferences", back_populates="client")
 
+
 class Specialization(Base):
-    __tablename__ = 'specializations'
+    __tablename__ = "specializations"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     employees = relationship("Employee", back_populates="specialization")
     services = relationship("Service", back_populates="specialization")
-    specialization_qualifications = relationship("SpecializationQualificationPivot", back_populates="specialization")
+    specialization_qualifications = relationship(
+        "SpecializationQualificationPivot", back_populates="specialization"
+    )
+
 
 class Schedule(Base):
-    __tablename__ = 'schedules'
+    __tablename__ = "schedules"
     id = Column(Integer, primary_key=True, index=True)
-    employee_id = Column(Integer, ForeignKey('employees.id'))
+    employee_id = Column(Integer, ForeignKey("employees.id"))
     date = Column(Date)
     start_time = Column(Time)
     end_time = Column(Time)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     employee = relationship("Employee", back_populates="schedules")
-    appointments = relationship("Appointment", secondary="schedule_appointment", back_populates="schedules")
+    appointments = relationship(
+        "Appointment", secondary="schedule_appointment", back_populates="schedules"
+    )
     exceptions = relationship("ScheduleException", back_populates="schedule")
     workload = relationship("EmployeeWorkload", back_populates="schedule")
 
+
 class ClientPreferences(Base):
-    __tablename__ = 'client_preferences'
+    __tablename__ = "client_preferences"
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey('clients.id'))
-    client_status_id = Column(Integer, ForeignKey('client_statuses.id'))
+    client_id = Column(Integer, ForeignKey("clients.id"))
+    client_status_id = Column(Integer, ForeignKey("client_statuses.id"))
     preferences = Column(Text)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     client = relationship("Client", back_populates="preferences")
     client_status = relationship("ClientStatus", back_populates="client_preferences")
 
+
 class ScheduleException(Base):
-    __tablename__ = 'schedule_exceptions'
+    __tablename__ = "schedule_exceptions"
     id = Column(Integer, primary_key=True, index=True)
-    schedule_id = Column(Integer, ForeignKey('schedules.id'))
+    schedule_id = Column(Integer, ForeignKey("schedules.id"))
     start_time = Column(Time)
     end_time = Column(Time)
     reason = Column(Text)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     schedule = relationship("Schedule", back_populates="exceptions")
 
+
 class ServicePopularity(Base):
-    __tablename__ = 'service_popularity'
-    service_id = Column(Integer, ForeignKey('services.id'), primary_key=True)
+    __tablename__ = "service_popularity"
+    service_id = Column(Integer, ForeignKey("services.id"), primary_key=True)
     month = Column(Date, primary_key=True)
     total_bookings = Column(Integer)
-    
+
     service = relationship("Service")
 
+
 class ServiceComplexPivot(Base):
-    __tablename__ = 'service_complex_pivot'
-    service_id = Column(Integer, ForeignKey('services.id'), primary_key=True)
-    complex_id = Column(Integer, ForeignKey('service_complexes.id'), primary_key=True)
+    __tablename__ = "service_complex_pivot"
+    service_id = Column(Integer, ForeignKey("services.id"), primary_key=True)
+    complex_id = Column(Integer, ForeignKey("service_complexes.id"), primary_key=True)
+
 
 class ScheduleAppointment(Base):
-    __tablename__ = 'schedule_appointment'
-    schedule_id = Column(Integer, ForeignKey('schedules.id'), primary_key=True)
-    appointment_id = Column(Integer, ForeignKey('appointments.id'), primary_key=True)
+    __tablename__ = "schedule_appointment"
+    schedule_id = Column(Integer, ForeignKey("schedules.id"), primary_key=True)
+    appointment_id = Column(Integer, ForeignKey("appointments.id"), primary_key=True)
+
 
 class AppointmentServicePivot(Base):
-    __tablename__ = 'appointment_service_pivot'
-    service_id = Column(Integer, ForeignKey('services.id'), primary_key=True)
-    appointment_id = Column(Integer, ForeignKey('appointments.id'), primary_key=True)
+    __tablename__ = "appointment_service_pivot"
+    service_id = Column(Integer, ForeignKey("services.id"), primary_key=True)
+    appointment_id = Column(Integer, ForeignKey("appointments.id"), primary_key=True)
 
     def __init__(self, service_id=None, appointment_id=None):
         self.service_id = service_id
         self.appointment_id = appointment_id
 
+
 class AppointmentComplexPivot(Base):
-    __tablename__ = 'appointment_complex_pivot'
-    complex_id = Column(Integer, ForeignKey('service_complexes.id'), primary_key=True)
-    appointment_id = Column(Integer, ForeignKey('appointments.id'), primary_key=True)
+    __tablename__ = "appointment_complex_pivot"
+    complex_id = Column(Integer, ForeignKey("service_complexes.id"), primary_key=True)
+    appointment_id = Column(Integer, ForeignKey("appointments.id"), primary_key=True)
+
 
 # Изменение названия класса и таблицы
 class SpecializationQualificationPivot(Base):
-    __tablename__ = 'specialization_qualification_pivot'
-    specialization_id = Column(Integer, ForeignKey('specializations.id'), primary_key=True)
-    qualification_id = Column(Integer, ForeignKey('qualifications.id'), primary_key=True)
+    __tablename__ = "specialization_qualification_pivot"
+    specialization_id = Column(
+        Integer, ForeignKey("specializations.id"), primary_key=True
+    )
+    qualification_id = Column(
+        Integer, ForeignKey("qualifications.id"), primary_key=True
+    )
     description = Column(Text, nullable=True)
-    
-    specialization = relationship("Specialization", back_populates="specialization_qualifications")
-    qualification = relationship("Qualification", back_populates="specialization_qualifications")
+
+    specialization = relationship(
+        "Specialization", back_populates="specialization_qualifications"
+    )
+    qualification = relationship(
+        "Qualification", back_populates="specialization_qualifications"
+    )
+
 
 class Employee(Base):
-    __tablename__ = 'employees'
+    __tablename__ = "employees"
     id = Column(Integer, primary_key=True, index=True)
-    specialization_id = Column(Integer, ForeignKey('specializations.id'))
-    qualification_level_id = Column(Integer, ForeignKey('qualifications.id'))
+    specialization_id = Column(Integer, ForeignKey("specializations.id"))
+    qualification_level_id = Column(Integer, ForeignKey("qualifications.id"))
     full_name = Column(String, unique=True, index=True)
     passport_number = Column(String, unique=True, index=True)
     phone = Column(String, unique=True, index=True, nullable=True)
@@ -143,57 +188,79 @@ class Employee(Base):
     telegram_chat_id = Column(BigInteger, unique=True, nullable=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     specialization = relationship("Specialization", back_populates="employees")
     qualification = relationship("Qualification", back_populates="employees")
     appointments = relationship("Appointment", back_populates="employee")
     schedules = relationship("Schedule", back_populates="employee")
 
+
 class ServiceComplex(Base):
-    __tablename__ = 'service_complexes'
+    __tablename__ = "service_complexes"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     price = Column(Float)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
-    services = relationship("Service", secondary="service_complex_pivot", back_populates="complexes")
-    appointments = relationship("Appointment", secondary="appointment_complex_pivot", back_populates="complexes")
+
+    services = relationship(
+        "Service", secondary="service_complex_pivot", back_populates="complexes"
+    )
+    appointments = relationship(
+        "Appointment", secondary="appointment_complex_pivot", back_populates="complexes"
+    )
+
 
 class Service(Base):
-    __tablename__ = 'services'
+    __tablename__ = "services"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
-    specialization_id = Column(Integer, ForeignKey('specializations.id'))
+    specialization_id = Column(Integer, ForeignKey("specializations.id"))
     base_price = Column(Float)  # Базовая стоимость услуги
     duration = Column(Integer)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     specialization = relationship("Specialization", back_populates="services")
-    service_qualifications = relationship("ServiceQualificationPivot", back_populates="service")
-    complexes = relationship("ServiceComplex", secondary="service_complex_pivot", back_populates="services")
-    appointments = relationship("Appointment", secondary="appointment_service_pivot", back_populates="services")
+    service_qualifications = relationship(
+        "ServiceQualificationPivot", back_populates="service"
+    )
+    complexes = relationship(
+        "ServiceComplex", secondary="service_complex_pivot", back_populates="services"
+    )
+    appointments = relationship(
+        "Appointment", secondary="appointment_service_pivot", back_populates="services"
+    )
+
 
 # Изменение названия класса и таблицы
 class ServiceQualificationPivot(Base):
-    __tablename__ = 'service_qualification_pivot'
-    service_id = Column(Integer, ForeignKey('services.id'), primary_key=True)
-    qualification_id = Column(Integer, ForeignKey('qualifications.id'), primary_key=True)
-    price_modified = Column(Float, default=0.0)  # Модификатор цены для данного уровня квалификации
-    is_allowed = Column(Boolean, default=True)  # Разрешен ли данный уровень квалификации для услуги
-    
+    __tablename__ = "service_qualification_pivot"
+    service_id = Column(Integer, ForeignKey("services.id"), primary_key=True)
+    qualification_id = Column(
+        Integer, ForeignKey("qualifications.id"), primary_key=True
+    )
+    price_modified = Column(
+        Float, default=0.0
+    )  # Модификатор цены для данного уровня квалификации
+    is_allowed = Column(
+        Boolean, default=True
+    )  # Разрешен ли данный уровень квалификации для услуги
+
     service = relationship("Service", back_populates="service_qualifications")
-    qualification = relationship("Qualification", back_populates="service_qualifications")
+    qualification = relationship(
+        "Qualification", back_populates="service_qualifications"
+    )
+
 
 class Appointment(Base):
-    __tablename__ = 'appointments'
+    __tablename__ = "appointments"
     id = Column(Integer, primary_key=True, index=True)
     status = Column(String)
-    client_id = Column(Integer, ForeignKey('clients.id'))
-    employee_id = Column(Integer, ForeignKey('employees.id'))
-    service_id = Column(Integer, ForeignKey('services.id'))
-    complex_id = Column(Integer, ForeignKey('service_complexes.id'), nullable=True)
+    client_id = Column(Integer, ForeignKey("clients.id"))
+    employee_id = Column(Integer, ForeignKey("employees.id"))
+    service_id = Column(Integer, ForeignKey("services.id"))
+    complex_id = Column(Integer, ForeignKey("service_complexes.id"), nullable=True)
     datetime = Column(DateTime)
     custom_duration = Column(Integer, nullable=True)
     is_completed = Column(Boolean, default=False)
@@ -202,106 +269,113 @@ class Appointment(Base):
     final_price = Column(Float)  # Итоговая цена с учетом квалификации мастера
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     client = relationship("Client", back_populates="appointments")
     employee = relationship("Employee", back_populates="appointments")
-    schedules = relationship("Schedule", secondary="schedule_appointment", back_populates="appointments")
+    schedules = relationship(
+        "Schedule", secondary="schedule_appointment", back_populates="appointments"
+    )
     notifications = relationship("Notification", back_populates="appointment")
-    services = relationship("Service", secondary="appointment_service_pivot", back_populates="appointments")
-    complexes = relationship("ServiceComplex", secondary="appointment_complex_pivot", back_populates="appointments")
+    services = relationship(
+        "Service", secondary="appointment_service_pivot", back_populates="appointments"
+    )
+    complexes = relationship(
+        "ServiceComplex",
+        secondary="appointment_complex_pivot",
+        back_populates="appointments",
+    )
+
 
 class EmployeeWorkload(Base):
-    __tablename__ = 'employee_workload'
-    schedule_id = Column(Integer, ForeignKey('schedules.id'), primary_key=True)
+    __tablename__ = "employee_workload"
+    schedule_id = Column(Integer, ForeignKey("schedules.id"), primary_key=True)
     booked_slots = Column(Integer)
     total_slots = Column(Integer)
     workload_percent = Column(Float)
-    
+
     schedule = relationship("Schedule", back_populates="workload")
 
-class NotificationStatus(enum.Enum):
-    scheduled = "scheduled"   # Запланировано
-    sent = "sent"            # Отправлено
-    delivered = "delivered"   # Доставлено
-    failed = "failed"        # Ошибка
-    cancelled = "cancelled"   # Отменено
 
 # Расширенные типы уведомлений
 class NotificationType(enum.Enum):
     appointment_reminder = "appointment_reminder"  # Напоминание клиенту о записи
-    appointment_created = "appointment_created"    # Уведомление мастеру о новой записи
-    appointment_confirmed = "appointment_confirmed" # Подтверждение записи
-    appointment_cancelled = "appointment_cancelled" # Отмена записи
-    admin_notification = "admin_notification"      # Уведомления для админа
+    appointment_created = "appointment_created"  # Уведомление мастеру о новой записи
+    appointment_confirmed = "appointment_confirmed"  # Подтверждение записи
+    appointment_cancelled = "appointment_cancelled"  # Отмена записи
+    admin_notification = "admin_notification"  # Уведомления для админа
+
 
 # Получатели уведомлений
 class NotificationRecipient(enum.Enum):
     client = "client"
-    employee = "employee" 
+    employee = "employee"
     admin = "admin"
+
 
 # Статусы уведомлений
 class NotificationStatus(enum.Enum):
-    scheduled = "scheduled"   # Запланировано
-    sent = "sent"            # Отправлено
-    delivered = "delivered"   # Доставлено
-    failed = "failed"        # Ошибка
-    cancelled = "cancelled"   # Отменено
+    scheduled = "scheduled"  # Запланировано
+    sent = "sent"  # Отправлено
+    delivered = "delivered"  # Доставлено
+    failed = "failed"  # Ошибка
+    cancelled = "cancelled"  # Отменено
+
 
 class Notification(Base):
-    __tablename__ = 'notifications'
-    
+    __tablename__ = "notifications"
+
     id = Column(Integer, primary_key=True, index=True)
-    
+
     # Основная информация
     type = Column(Enum(NotificationType), nullable=False)
     recipient_type = Column(Enum(NotificationRecipient), nullable=False)
-    
+
     # Связи
-    appointment_id = Column(Integer, ForeignKey('appointments.id'))
-    client_id = Column(Integer, ForeignKey('clients.id'), nullable=True)
-    employee_id = Column(Integer, ForeignKey('employees.id'), nullable=True)
-    
+    appointment_id = Column(Integer, ForeignKey("appointments.id"))
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+
     # Telegram специфика
     telegram_chat_id = Column(BigInteger, nullable=True)
     message_id = Column(BigInteger, nullable=True)  # ID отправленного сообщения
-    
+
     # Временные метки
     scheduled_at = Column(DateTime)
     sent_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
-    
+
     # Статус и попытки
     status = Column(Enum(NotificationStatus), default=NotificationStatus.scheduled)
     attempts = Column(Integer, default=0)
     max_attempts = Column(Integer, default=3)
-    
+
     # Контент
     title = Column(String(255), nullable=True)
     message = Column(Text, nullable=True)
     additional_data = Column(Text, nullable=True)  # JSON для дополнительных данных
-    
+
     # Системные поля
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-    
+
     # Relationships
     appointment = relationship("Appointment", back_populates="notifications")
     client = relationship("Client")
     employee = relationship("Employee")
 
+
 # Добавляем таблицу для действий пользователей с уведомлениями
 class NotificationAction(Base):
-    __tablename__ = 'notification_actions'
-    
+    __tablename__ = "notification_actions"
+
     id = Column(Integer, primary_key=True, index=True)
-    notification_id = Column(Integer, ForeignKey('notifications.id'))
-    
+    notification_id = Column(Integer, ForeignKey("notifications.id"))
+
     action_type = Column(String(50))  # 'confirm', 'cancel', 'reschedule'
     telegram_chat_id = Column(BigInteger)
     callback_data = Column(String(255))
-    
+
     performed_at = Column(DateTime)
     created_at = Column(DateTime)
-    
+
     notification = relationship("Notification")

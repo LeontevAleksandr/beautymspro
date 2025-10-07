@@ -6,7 +6,7 @@ from database import engine
 from models import Base
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,9 @@ def create_database_if_not_exists():
     DB_USER = os.environ.get('DB_USER', 'postgres')
     DB_PASSWORD = os.environ.get('DB_PASSWORD', 'postgres')
     DB_HOST = os.environ.get('DB_HOST', 'localhost')
-    DB_PORT = os.environ.get('DB_PORT', '5432')
+    DB_PORT = os.environ.get('DB_PORT', '5433')
     DB_NAME = os.environ.get('DB_NAME', 'db_beauty_room_38')
-    
+
     try:
         # Подключаемся к серверу PostgreSQL
         conn = psycopg2.connect(
@@ -30,11 +30,11 @@ def create_database_if_not_exists():
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
-        
+
         # Проверяем, существует ли база данных
         cursor.execute("SELECT 1 FROM pg_catalog.pg_database WHERE datname = %s", (DB_NAME,))
         exists = cursor.fetchone()
-        
+
         if not exists:
             logger.info(f"База данных {DB_NAME} не существует. Создаем...")
             # Создаем базу данных
@@ -42,14 +42,14 @@ def create_database_if_not_exists():
             logger.info(f"База данных {DB_NAME} успешно создана!")
         else:
             logger.info(f"База данных {DB_NAME} уже существует.")
-        
+
         cursor.close()
         conn.close()
-        
+
         # Создаем таблицы в базе данных
         Base.metadata.create_all(bind=engine)
         logger.info("Таблицы успешно созданы или уже существуют.")
-        
+
         return True
     except Exception as e:
         logger.error(f"Ошибка при создании базы данных: {str(e)}")
