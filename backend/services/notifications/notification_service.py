@@ -52,7 +52,7 @@ class NotificationService:
                 .filter(
                     and_(
                         Notification.status == NotificationStatus.scheduled,
-                        Notification.scheduled_at >= datetime.now(),
+                        Notification.scheduled_at <= datetime.now(),
                         Notification.attempts < Notification.max_attempts,
                     )
                 )
@@ -78,6 +78,7 @@ class NotificationService:
             bool: True если успешно отправлено
         """
         session = self.db_session_factory()
+
         try:
             # Подготавливаем клавиатуру если это напоминание
             keyboard = None
@@ -94,12 +95,15 @@ class NotificationService:
             )
 
             # Обновляем статус
+            logger.error(
+                        f"Статус Уведомления {success}"
+                    )
             notification.attempts += 1
             if success:
                 notification.status = NotificationStatus.sent
                 notification.sent_at = datetime.now()
                 notification.updated_at = datetime.now()
-                # logger.info(f"Уведомление {notification.id} отправлено")
+                logger.info(f"Уведомление {notification.id} отправлено")
             else:
                 if notification.attempts >= notification.max_attempts:
                     notification.status = NotificationStatus.failed
@@ -114,6 +118,7 @@ class NotificationService:
 
                 notification.updated_at = datetime.now()
 
+            notification = session.merge(notification)
             session.commit()
             return success
 
