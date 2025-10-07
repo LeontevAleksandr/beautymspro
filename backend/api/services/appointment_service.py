@@ -4,7 +4,6 @@ from models import (
     Appointment, Service, ServiceComplex, Schedule, ScheduleException,
     ServiceComplexPivot, AppointmentServicePivot, AppointmentComplexPivot
 )
-# from notification_service import NotificationType
 import logging
 import asyncio
 
@@ -187,24 +186,3 @@ class AppointmentService:
                 )
                 session.add(service_pivot)
 
-    # @staticmethod
-    # def send_appointment_notification(notification_service, session, appointment_id):
-    #     """Отправляет уведомления о записи"""
-    #     try:
-    #         loop = asyncio.new_event_loop()
-    #         asyncio.set_event_loop(loop)
-
-    #         notifications = loop.run_until_complete(
-    #             notification_service.create_appointment_notification(
-    #                 session, appointment_id, NotificationType.appointment_created
-    #             )
-    #         )
-
-    #         # Отправляем уведомления
-    #         for notification in notifications:
-    #             loop.run_until_complete(
-    #                 notification_service.send_notification(notification.id)
-    #             )
-
-    #     except Exception as e:
-    #         logger.warning(f"Failed to send appointment notification: {e}")

@@ -25,10 +25,6 @@ class NotificationWorker:
         self._is_running = False
         self._thread: Optional[threading.Thread] = None
 
-        logger.info(
-            f"Инициализирован воркер уведомлений с интервалом {check_interval} секунд"
-        )
-
     def start(self):
         """Запустить воркер в фоновом режиме"""
 
@@ -63,6 +59,7 @@ class NotificationWorker:
         """Основной цикл работы воркера"""
         while self._is_running:
             try:
+                logger.info("Выполняется отправка уведомлений")
                 await self.func_logic()  # Вызов функции логики
                 await asyncio.sleep(self.check_interval)  # Усыпляем поток
             except Exception as e:
